@@ -83,8 +83,8 @@ pub fn cov(
 
     let length = x.len();
     let phi = match estimator {
-        Estimator::Biased => tss / length as f32,
-        Estimator::Unbiased => tss / ((length - 1).max(1) as f32),
+        Estimator::Unbiased => tss / length as f32,
+        Estimator::Biased => tss / ((length + 1) as f32),
     };
     Some(phi)
 }
@@ -107,7 +107,7 @@ mod tests {
         let values: &[f32] = &[2.0, 4.0, 6.0, 8.0, 10.0];
         let lag: usize = 2;
 
-        let result = acov(values, lag, f32::NAN, Estimator::Biased).unwrap();
+        let result = acov(values, lag, f32::NAN, Estimator::Unbiased).unwrap();
 
         let expected: f32 = -1.3333334;
         assert_approx_eq!(f32, result, expected);
@@ -120,7 +120,7 @@ mod tests {
         ];
         let lag: usize = 1;
 
-        let result = acov(values, lag, f32::NAN, Estimator::Biased).unwrap();
+        let result = acov(values, lag, f32::NAN, Estimator::Unbiased).unwrap();
 
         let expected: f32 = -0.00046011107;
         assert_approx_eq!(f32, result, expected);
@@ -133,7 +133,7 @@ mod tests {
         let y: &[f32] = &values[2..];
         let mean = mean_unchecked(&values);
 
-        let result = cov(x, y, mean, mean, Estimator::Biased).unwrap();
+        let result = cov(x, y, mean, mean, Estimator::Unbiased).unwrap();
 
         let expected: f32 = -1.3333334;
         assert_approx_eq!(f32, result, expected);
