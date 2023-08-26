@@ -17,8 +17,6 @@ pub enum Estimator {
 /// ## Arguments
 /// * `values` - The values to calculate the autocovariance for.
 /// * `lag` - The lag of the data. The lag must be less than the number of elements.
-/// * `mean` - The precalculated mean of `values`. Pass [`f32::NAN`], [`f32::INFINITY`] or [`f32::NEG_INFINITY`] to force calculation of the mean.
-/// * `estimator` - Whether to use a biased or unbiased estimator.
 ///
 /// ## Returns
 /// [`None`] if the values input is empty, or some value representing the autocovariance.
@@ -46,14 +44,11 @@ pub fn acov<'a, T: Borrow<TimeSeries<'a>>>(values: T, lag: usize) -> Option<f32>
     cov(x, y)
 }
 
-/// Calculates the covariance with a given lag.
+/// Calculates the covariance.
 ///
 /// ## Arguments
 /// * `x` - The first signal.
 /// * `y` - The second signal.
-/// * `mean_x` - The mean of `x`. Pass [`f32::NAN`], [`f32::INFINITY`] or [`f32::NEG_INFINITY`] to force calculation of the mean.
-/// * `mean_y` - The mean of `y`. Pass [`f32::NAN`], [`f32::INFINITY`] or [`f32::NEG_INFINITY`] to force calculation of the mean.
-/// * `estimator` - Whether to use a biased or unbiased estimator.
 ///
 /// ## Returns
 /// [`None`] if the values input is empty, or some value representing the covariance.
@@ -63,6 +58,8 @@ pub fn cov<'x, 'y, X: Borrow<TimeSeries<'x>>, Y: Borrow<TimeSeries<'y>>>(
 ) -> Option<f32> {
     let x = x.borrow();
     let y = y.borrow();
+    assert_eq!(x.len(), y.len());
+    debug_assert_eq!(x.estimator(), y.estimator());
 
     if x.is_empty() || x.len() != y.len() {
         return None;
@@ -84,6 +81,58 @@ pub fn cov<'x, 'y, X: Borrow<TimeSeries<'x>>, Y: Borrow<TimeSeries<'y>>>(
         Estimator::Biased => tss / ((length + 1) as f32),
     };
     Some(phi)
+}
+
+/// Calculates the autocorrelation coefficient with a given lag.
+///
+/// ## Arguments
+/// * `values` - The values to calculate the autocorrelation for.
+/// * `lag` - The lag of the data. The lag must be less than the number of elements.
+///
+/// ## Returns
+/// [`None`] if the values input is empty, or some value representing the autocorrelation.
+pub fn acorr<'a, T: Borrow<TimeSeries<'a>>>(values: T, lag: usize) -> Option<f32> {
+    let values = values.borrow();
+    if values.is_empty() {
+        return None;
+    }
+
+    if lag >= values.len() {
+        return None;
+    }
+
+    let mean = values.mean();
+
+    // Obtain the lag-shifted signals.
+    let length = values.len() - lag;
+    let x = &values[..length];
+    let y = &values[lag..];
+
+    let x = TimeSeries::try_new_with(x, mean, f32::NAN, f32::NAN, values.estimator())
+        .expect("time series has enough data points");
+    let y = TimeSeries::try_new_with(y, mean, f32::NAN, f32::NAN, values.estimator())
+        .expect("time series has enough data points");
+    corr(x, y)
+}
+
+/// Calculates the correlation coefficient.
+///
+/// ## Arguments
+/// * `x` - The first signal.
+/// * `y` - The second signal.
+///
+/// ## Returns
+/// [`None`] if the values input is empty, or some value representing the correlation coefficient.
+pub fn corr<'x, 'y, X: Borrow<TimeSeries<'x>>, Y: Borrow<TimeSeries<'y>>>(
+    x: X,
+    y: Y,
+) -> Option<f32> {
+    let x = x.borrow();
+    let y = y.borrow();
+    match cov(x, y) {
+        None => None,
+        Some(phi) => Some(phi / (x.std() * y.std())),
+    }
 }
 
 #[cfg(test)]
@@ -136,5 +185,19 @@ mod tests {
         assert_approx_eq!(f32, values.mean(), 6.0);
         assert_approx_eq!(f32, values.var(), 10.0);
         assert_approx_eq!(f32, values.std(), 3.1622776601683795);
+    }
+
+    #[test]
+    fn test_acorr() {
+        let values: &[f32] = &[
+            0.05, 0.01, -0.02, 0.03, -0.04, 0.06, 0.02, -0.01, -0.03, 0.04,
+        ];
+        let values = TimeSeries::try_new(values, Estimator::Unbiased).unwrap();
+        let lag: usize = 1;
+
+        let result = acorr(values, lag).unwrap();
+
+        let expected: f32 = -0.37935397;
+        assert_approx_eq!(f32, result, expected);
     }
 }
