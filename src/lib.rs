@@ -1,4 +1,10 @@
+pub use crate::time_series::{TimeSeries, TimeSeriesError};
+use std::borrow::Borrow;
+
+mod time_series;
+
 /// Defines the estimator to use.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Estimator {
     /// A biased estimator (sample based).
     Biased,
@@ -16,7 +22,8 @@ pub enum Estimator {
 ///
 /// ## Returns
 /// [`None`] if the values input is empty, or some value representing the autocovariance.
-pub fn acov(values: &[f32], lag: usize, mut mean: f32, estimator: Estimator) -> Option<f32> {
+pub fn acov<'a, T: Borrow<TimeSeries<'a>>>(values: T, lag: usize) -> Option<f32> {
+    let values = values.borrow();
     if values.is_empty() {
         return None;
     }
@@ -25,20 +32,18 @@ pub fn acov(values: &[f32], lag: usize, mut mean: f32, estimator: Estimator) -> 
         return None;
     }
 
-    if !mean.is_finite() {
-        // As AR(I)MA models are applied to stationary time series, the variance stays the
-        // same regardless of the window we select. Because of that, and since the variance is based
-        // on the mean, we can calculate the mean directly from the original sample instead of the
-        // lagged versions.
-        mean = mean_unchecked(&values);
-    }
+    let mean = values.mean();
 
     // Obtain the lag-shifted signals.
     let length = values.len() - lag;
     let x = &values[..length];
     let y = &values[lag..];
 
-    cov(x, y, mean, mean, estimator)
+    let x = TimeSeries::try_new_with(x, mean, f32::NAN, f32::NAN, values.estimator())
+        .expect("time series has enough data points");
+    let y = TimeSeries::try_new_with(y, mean, f32::NAN, f32::NAN, values.estimator())
+        .expect("time series has enough data points");
+    cov(x, y)
 }
 
 /// Calculates the covariance with a given lag.
@@ -52,24 +57,19 @@ pub fn acov(values: &[f32], lag: usize, mut mean: f32, estimator: Estimator) -> 
 ///
 /// ## Returns
 /// [`None`] if the values input is empty, or some value representing the covariance.
-pub fn cov(
-    x: &[f32],
-    y: &[f32],
-    mut mean_x: f32,
-    mut mean_y: f32,
-    estimator: Estimator,
+pub fn cov<'x, 'y, X: Borrow<TimeSeries<'x>>, Y: Borrow<TimeSeries<'y>>>(
+    x: X,
+    y: Y,
 ) -> Option<f32> {
+    let x = x.borrow();
+    let y = y.borrow();
+
     if x.is_empty() || x.len() != y.len() {
         return None;
     }
 
-    if !mean_x.is_finite() {
-        mean_x = mean_unchecked(&x);
-    }
-
-    if !mean_y.is_finite() {
-        mean_y = mean_unchecked(&y);
-    }
+    let mean_x = x.mean();
+    let mean_y = y.mean();
 
     // Remove the mean from the original and the time-shifted signal.
     let x_error = x.iter().map(|x| x - mean_x);
@@ -82,19 +82,11 @@ pub fn cov(
     }
 
     let length = x.len();
-    let phi = match estimator {
+    let phi = match x.estimator() {
         Estimator::Unbiased => tss / length as f32,
         Estimator::Biased => tss / ((length + 1) as f32),
     };
     Some(phi)
-}
-
-/// Calculates the mean of the values in the given slice.
-/// Assumes that the slice is nonempty.
-fn mean_unchecked(slice: &[f32]) -> f32 {
-    debug_assert!(!slice.is_empty());
-    let sum: f32 = slice.iter().sum();
-    sum / slice.len() as f32
 }
 
 #[cfg(test)]
@@ -105,9 +97,10 @@ mod tests {
     #[test]
     fn test_acov() {
         let values: &[f32] = &[2.0, 4.0, 6.0, 8.0, 10.0];
+        let values = TimeSeries::try_new(values, Estimator::Unbiased).unwrap();
         let lag: usize = 2;
 
-        let result = acov(values, lag, f32::NAN, Estimator::Unbiased).unwrap();
+        let result = acov(values, lag).unwrap();
 
         let expected: f32 = -1.3333334;
         assert_approx_eq!(f32, result, expected);
@@ -118,9 +111,10 @@ mod tests {
         let values: &[f32] = &[
             0.05, 0.01, -0.02, 0.03, -0.04, 0.06, 0.02, -0.01, -0.03, 0.04,
         ];
+        let values = TimeSeries::try_new(values, Estimator::Unbiased).unwrap();
         let lag: usize = 1;
 
-        let result = acov(values, lag, f32::NAN, Estimator::Unbiased).unwrap();
+        let result = acov(values, lag).unwrap();
 
         let expected: f32 = -0.00046011107;
         assert_approx_eq!(f32, result, expected);
@@ -128,14 +122,22 @@ mod tests {
 
     #[test]
     fn test_cov() {
-        let values: &[f32] = &[2.0, 4.0, 6.0, 8.0, 10.0];
-        let x: &[f32] = &values[0..3];
-        let y: &[f32] = &values[2..];
-        let mean = mean_unchecked(&values);
+        let values = TimeSeries::try_new(&[2.0, 4.0, 6.0, 8.0, 10.0], Estimator::Unbiased).unwrap();
 
-        let result = cov(x, y, mean, mean, Estimator::Unbiased).unwrap();
+        let x = values
+            .slice_stationary(..3)
+            .expect("time series has enough data");
+        let y = values
+            .slice_stationary(2..)
+            .expect("time series has enough data");
 
-        let expected: f32 = -1.3333334;
-        assert_approx_eq!(f32, result, expected);
+        let result = cov(x, y).unwrap();
+
+        assert_approx_eq!(f32, result, -1.3333334);
+
+        // Because we sliced the time series as stationary, these values now exist.
+        assert_approx_eq!(f32, values.mean(), 6.0);
+        assert_approx_eq!(f32, values.var(), 10.0);
+        assert_approx_eq!(f32, values.std(), 3.1622776601683795);
     }
 }
