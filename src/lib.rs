@@ -68,12 +68,9 @@ pub fn cov<'x, 'y, X: Borrow<TimeSeries<'x>>, Y: Borrow<TimeSeries<'y>>>(
         return None;
     }
 
-    let mean_x = x.mean();
-    let mean_y = y.mean();
-
     // Remove the mean from the original and the time-shifted signal.
-    let x_error = x.iter().map(|x| x - mean_x);
-    let y_error = y.iter().map(|x| x - mean_y);
+    let x_error = x.residuals();
+    let y_error = y.residuals();
 
     // Calculate the covariance.
     let tss: f32 = x_error.zip(y_error).map(|(x, y)| x * y).sum();

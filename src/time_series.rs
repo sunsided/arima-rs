@@ -132,6 +132,12 @@ impl<'a> TimeSeries<'a> {
         self.std.set(std);
         std
     }
+
+    /// Calculates the residuals, i.e. the deviations from the mean.
+    pub fn residuals(&self) -> impl Iterator<Item = f32> + 'a {
+        let mean = self.mean();
+        self.values.iter().map(move |x| x - mean)
+    }
 }
 
 impl<'a> TryFrom<&'a [f32]> for TimeSeries<'a> {
