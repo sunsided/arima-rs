@@ -58,8 +58,8 @@ const MARGIN = { top: 14, right: 16, bottom: 34, left: 52 };
 /** The height of one legend row. */
 const LEGEND_ROW = 20;
 
-/** Light and dark values per role, from the reference palette. */
-const STYLE = `
+/** Light values per role, from the reference palette. */
+const LIGHT = `
 .bs-surface { fill: #fcfcfb; }
 .bs-text { fill: #52514e; font: 12px system-ui, -apple-system, 'Segoe UI', sans-serif; }
 .bs-title { fill: #0b0b0b; }
@@ -74,28 +74,44 @@ const STYLE = `
 .bs-refit { stroke: #6250d6; fill: #6250d6; }
 .bs-region-critical { fill: #d03b3b; fill-opacity: 0.08; stroke: none; }
 .bs-region-muted { fill: #a9a8a2; fill-opacity: 0.1; stroke: none; }
-.bs-ring { stroke: #fcfcfb; }
-@media (prefers-color-scheme: dark) {
-  .bs-surface { fill: #1a1a19; }
-  .bs-text { fill: #c3c2b7; }
-  .bs-title { fill: #f0efec; }
-  .bs-grid { stroke: #2e2e2c; }
-  .bs-axis { stroke: #5c5b55; }
-  .bs-data { stroke: #3987e5; fill: #3987e5; }
-  .bs-forecast { stroke: #d95926; fill: #d95926; }
-  .bs-band-outer { fill: #104281; }
-  .bs-band-inner { fill: #1c5cab; }
-  .bs-critical { stroke: #e66767; fill: #e66767; }
-  .bs-muted { stroke: #5c5b55; fill: #2e2e2c; }
-  .bs-refit { stroke: #9085e9; fill: #9085e9; }
-  .bs-region-critical { fill: #e66767; fill-opacity: 0.12; }
-  .bs-region-muted { fill: #5c5b55; fill-opacity: 0.2; }
-  .bs-ring { stroke: #1a1a19; }
+.bs-ring { stroke: #fcfcfb; }`;
+
+/** Dark values per role: the same hues, stepped for the dark surface. */
+const DARK = `
+.bs-surface { fill: #1a1a19; }
+.bs-text { fill: #c3c2b7; font: 12px system-ui, -apple-system, 'Segoe UI', sans-serif; }
+.bs-title { fill: #f0efec; }
+.bs-grid { stroke: #2e2e2c; stroke-width: 1; }
+.bs-axis { stroke: #5c5b55; stroke-width: 1; }
+.bs-data { stroke: #3987e5; fill: #3987e5; }
+.bs-forecast { stroke: #d95926; fill: #d95926; }
+.bs-band-outer { fill: #104281; stroke: none; }
+.bs-band-inner { fill: #1c5cab; stroke: none; }
+.bs-critical { stroke: #e66767; fill: #e66767; }
+.bs-muted { stroke: #5c5b55; fill: #2e2e2c; }
+.bs-refit { stroke: #9085e9; fill: #9085e9; }
+.bs-region-critical { fill: #e66767; fill-opacity: 0.12; stroke: none; }
+.bs-region-muted { fill: #5c5b55; fill-opacity: 0.2; stroke: none; }
+.bs-ring { stroke: #1a1a19; }`;
+
+/** Lines are never filled; this comes last so no role's `fill` overrides it. */
+const LAST = `.bs-line { fill: none; }`;
+
+/**
+ * The stylesheet for a theme. `auto` follows `prefers-color-scheme`, which suits the site;
+ * the README needs fixed files, because GitHub picks the image by its own theme.
+ */
+function style(theme: 'auto' | 'light' | 'dark'): string {
+	if (theme === 'light') return LIGHT + LAST;
+	if (theme === 'dark') return DARK + LAST;
+	return `${LIGHT}\n@media (prefers-color-scheme: dark) {${DARK}\n}\n${LAST}`;
 }
-.bs-line { fill: none; }`;
 
 /** Renders `spec` as an SVG string and returns it with the scales it used. */
-export function renderChart(spec: ChartSpec): { svg: string; scales: Scales } {
+export function renderChart(
+	spec: ChartSpec,
+	theme: 'auto' | 'light' | 'dark' = 'auto'
+): { svg: string; scales: Scales } {
 	const labelled = spec.layers.filter((layer) => layer.label);
 	const showLegend = spec.legend ?? labelled.length >= 2;
 	const legendItems = showLegend ? layoutLegend(labelled, MARGIN.left, spec.width - MARGIN.right) : [];
@@ -164,7 +180,7 @@ export function renderChart(spec: ChartSpec): { svg: string; scales: Scales } {
 
 	const svg =
 		`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${spec.width} ${spec.height}" width="${spec.width}" height="${spec.height}" role="img">` +
-		`<title>${escape(spec.title)}</title><style>${STYLE}</style>${parts.join('')}</svg>`;
+		`<title>${escape(spec.title)}</title><style>${style(theme)}</style>${parts.join('')}</svg>`;
 	return { svg, scales };
 }
 

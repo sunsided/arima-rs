@@ -10,6 +10,14 @@ A model is fitted wherever there is an allocator (a laptop, a server, statsmodel
 all a microcontroller needs to filter new values and forecast them with prediction intervals. The name is the backshift
 operator `B` that ARIMA models are written in: `(1 - B)^d y_t` is the series differenced `d` times.
 
+**[Try it in the browser](https://sunsided.github.io/arima-rs/)**: fit, forecast, stream and refit, compiled to
+WebAssembly.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/forecast-dark.svg">
+  <img alt="A seasonal monthly series with the airline model ARIMA(0,1,1)(0,1,1)[12], chosen by auto.arima, and its 36-month forecast with 80% and 95% prediction intervals" src="docs/img/forecast-light.svg">
+</picture>
+
 ```rust
 use backshift::{Arima, Filter};
 
@@ -32,6 +40,11 @@ The crate is for running ARIMA where a Python process won't fit: on a microcontr
 or in a Rust service that would rather not link BLAS. The streaming filter is the part that sets it apart. Each new value
 costs one Kalman step in `O(r²)` for `r = max(p, q + 1)` states, the innovation it returns doubles as an anomaly score
 (its variance comes with it), and the whole state lives inline in a `Copy` struct.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/stream-dark.svg">
+  <img alt="The innovations of a streamed sensor series inside a 4-sigma band; three injected spikes cross it and are flagged as anomalies" src="docs/img/stream-light.svg">
+</picture>
 
 For model selection it has the Hyndman–Khandakar stepwise search of R's `auto.arima`. Its choices match pmdarima's on
 the test series once the differencing orders are fixed. The differencing tests themselves differ on purpose: `D` comes
@@ -119,7 +132,23 @@ filter.warm_up(&window); // continue from the end of the window
 A failed refit, such as `FitError::Degenerate` from a stuck sensor, leaves the running model untouched. The scratch is
 about `4 r² + (exog.len() + 2) n` values for `r` ARMA states and `n` differenced values: 2.2 KB for ARIMA(1,1,1) with
 drift over 100 values, 9.3 KB for the airline model over 144. [`examples/device_refit.rs`](examples/device_refit.rs)
-runs the whole loop: stream, check every window, refit on drift, swap.
+runs the whole loop: stream, check every window, refit on drift, swap:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/drift-dark.svg">
+  <img alt="A stream whose AR coefficient changes at t = 500; the two windows that failed the Ljung-Box test and triggered a refit are shaded" src="docs/img/drift-light.svg">
+</picture>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/drift-coefficient-dark.svg">
+  <img alt="The AR coefficient the device uses: 0.2 until the first refit at t = 600 moves it to 0.71, the second at t = 800 to 0.85, against the true jump from 0.2 to 0.85 at t = 500" src="docs/img/drift-coefficient-light.svg">
+</picture>
+
+## In JavaScript
+
+The [`@sunsided/backshift`](https://www.npmjs.com/package/@sunsided/backshift) npm package brings fitting, forecasts,
+the streaming filter and refits to the browser and Node through WebAssembly, built from the same code with the `libm`
+backend. The [demo site](https://sunsided.github.io/arima-rs/) runs on it; [`bindings/wasm`](bindings/wasm) has the
+API.
 
 ## Checked against statsmodels
 

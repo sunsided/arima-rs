@@ -113,4 +113,9 @@ jobs:
           yarn install --immutable
           yarn check
           yarn build
+      # The README charts are seeded and drawn by the package; they must match what it draws now.
+      - name: Check the README charts are current
+        run: |
+          (cd site && yarn readme-charts)
+          git diff --exit-code docs/img
 
