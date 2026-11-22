@@ -14,10 +14,12 @@ extern crate alloc;
 #[cfg(any(feature = "std", test))]
 extern crate std;
 
+pub use crate::difference::{difference, integrate};
 pub use crate::time_series::{TimeSeries, TimeSeriesError};
 use alloc::vec::Vec;
 use core::borrow::Borrow;
 
+mod difference;
 mod math;
 mod time_series;
 

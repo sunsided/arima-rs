@@ -1,6 +1,6 @@
 //! Property tests: invariants that must hold for any non-constant series.
 
-use backshift::{acorr, acov, corr, cov, pacf, Estimator, TimeSeries};
+use backshift::{acorr, acov, corr, cov, difference, integrate, pacf, Estimator, TimeSeries};
 use proptest::prelude::*;
 
 /// Absolute slack for floating-point round-off in the invariants below.
@@ -154,6 +154,31 @@ proptest! {
         assert_close(result[1], acorr(&x, 1).unwrap())?;
         for (lag, phi) in result.iter().enumerate() {
             prop_assert!(phi.abs() <= 1.0 + 1e-6, "lag {lag}: {phi}");
+        }
+    }
+
+    /// One pass of differencing is exactly `x[t + 1] - x[t]`, the same operation as `numpy.diff`.
+    #[test]
+    fn difference_is_exact(values in series()) {
+        let expected: Vec<f64> = values.windows(2).map(|w| w[1] - w[0]).collect();
+        let once = difference(&values, 1);
+        prop_assert_eq!(&once, &expected);
+        prop_assert_eq!(difference(&values, 2), difference(&once, 1));
+    }
+
+    /// Integrating the differences after any split point restores the rest of the series.
+    #[test]
+    fn integrate_inverts_difference(values in series(), d in 0usize..4, split in 0usize..200) {
+        prop_assume!(d < values.len());
+        let split = d + split % (values.len() - d);
+        let differenced = difference(&values, d);
+        prop_assert_eq!(differenced.len(), values.len() - d);
+
+        let restored = integrate(&values[..split], &differenced[split - d..], d).unwrap();
+        prop_assert_eq!(restored.len(), values.len() - split);
+        let scale = values.iter().fold(1.0_f64, |m, v| m.max(v.abs()));
+        for (actual, expected) in restored.iter().zip(&values[split..]) {
+            prop_assert!((actual - expected).abs() <= 1e-9 * scale * len_f64(values.len()), "{actual} vs {expected}");
         }
     }
 }
