@@ -79,6 +79,10 @@
 			try {
 				worker = spawn();
 			} catch (e) {
+				// The old worker is gone, so a fit in flight ends here too.
+				worker = null;
+				latest++;
+				idle();
 				error = `cannot start a worker: ${e instanceof Error ? e.message : String(e)}`;
 				return;
 			}

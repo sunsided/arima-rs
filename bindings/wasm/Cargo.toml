@@ -3,7 +3,7 @@
 #     bindings/wasm/build.sh
 [package]
 name = "backshift-wasm"
-version = "0.1.0"
+version = "0.1.1"
 description = "ARIMA models in the browser and Node: fit, forecast with intervals, stream and refit, via WebAssembly"
 authors = ["Markus Mayer"]
 repository = "https://github.com/sunsided/arima-rs"
