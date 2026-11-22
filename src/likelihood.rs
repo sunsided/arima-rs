@@ -68,6 +68,43 @@ pub fn loglike(y: &[f64], spec: &ArimaSpec<'_>) -> Result<f64, FilterError> {
     Ok(-0.5 * sum)
 }
 
+/// The log-likelihood of the ARMA series `w` with `sigma2` concentrated out.
+///
+/// All innovation variances scale with `sigma2`, so the filter runs once with
+/// `sigma2 = 1`, and the maximising `sigma2 = sum(v_t^2 / F_t) / n` follows in closed
+/// form over the `n` non-missing values. Returns `(log-likelihood, sigma2, n)`, the
+/// same maximum as the full likelihood, or [`None`] if the model is invalid or no
+/// value is present.
+pub(crate) fn concentrated(w: &[f64], ar: &[f64], ma: &[f64]) -> Option<(f64, f64, usize)> {
+    let spec = ArimaSpec {
+        ar,
+        d: 0,
+        ma,
+        mean: 0.0,
+        sigma2: 1.0,
+    };
+    let (mut count, mut log_variances, mut weighted) = (0_usize, 0.0, 0.0);
+    Workspace::new(&spec)
+        .ok()?
+        .run(w, |Innovation { value, variance }| {
+            if !value.is_nan() {
+                count += 1;
+                log_variances += math::ln(variance);
+                weighted += value * value / variance;
+            }
+        });
+    if count == 0 {
+        return None;
+    }
+
+    let n = count as f64;
+    let sigma2 = weighted / n;
+    let llf =
+        -0.5 * (n * (math::ln(core::f64::consts::TAU) + 1.0 + math::ln(sigma2)) + log_variances);
+
+    Some((llf, sigma2, count))
+}
+
 /// `diff(y, d) - mean`: the series the ARMA part models.
 fn demeaned_difference(y: &[f64], spec: &ArimaSpec<'_>) -> Vec<f64> {
     let mut w = difference(y, spec.d);

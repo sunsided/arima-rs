@@ -12,6 +12,7 @@ import pathlib
 import numpy as np
 import statsmodels
 from statsmodels.regression.linear_model import burg, yule_walker
+from statsmodels.tsa.arima.estimators.hannan_rissanen import hannan_rissanen
 from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 from statsmodels.tsa.stattools import acf, acovf, pacf
@@ -201,6 +202,11 @@ def arma_case(index, name, doc, ar, d, ma, mean, sigma2, missing):
     head = exact_filter(SARIMAX(w[: ARMA_SPLIT - d], order=order, trend="n"), params)
     extended = exact_extend(head, w[ARMA_SPLIT - d :], order, params)
 
+    fit_with_mean = d == 0 or mean != 0.0
+    raw_w = np.diff(y, n=d)
+    fit = ARIMA(raw_w, order=order, trend="c" if fit_with_mean else "n").fit()
+    fit_params = dict(zip(fit.model.param_names, fit.params))
+
     model, trend_params = forecast_model(y, ar, d, ma, mean)
     forecast = exact_filter(model, [*trend_params, *params]).get_forecast(ARMA_HORIZON)
 
@@ -215,9 +221,26 @@ def arma_case(index, name, doc, ar, d, ma, mean, sigma2, missing):
         "forecast_mean": forecast.predicted_mean,
         "forecast_variance": forecast.var_pred_mean,
     }
+    arrays |= {
+        "fit_ar": [fit_params[f"ar.L{i + 1}"] for i in range(len(ar))],
+        "fit_ma": [fit_params[f"ma.L{i + 1}"] for i in range(len(ma))],
+    }
+    if np.isnan(raw_w).any():
+        hr_lines = ["    hannan_rissanen: None,"]
+    else:
+        centered = raw_w - (raw_w.mean() if fit_with_mean else 0.0)
+        start, _ = hannan_rissanen(centered, ar_order=len(ar), ma_order=len(ma), unbiased=False)
+        hr_ar = start.ar_params if len(ar) else []
+        hr_ma = start.ma_params if len(ma) else []
+        hr_lines = [f"    hannan_rissanen: Some(({rust_array(hr_ar)}, {rust_array(hr_ma)})),"]
     lines = [f"/// {doc}", f"pub const {name}: ArmaCase = ArmaCase {{"]
     lines += [f"    {field}: {rust_array(values)}," for field, values in arrays.items()]
+    lines += hr_lines
     lines += [
+        f"    fit_with_mean: {str(fit_with_mean).lower()},",
+        f"    fit_mean: {rust_float(fit_params.get('const', 0.0))},",
+        f"    fit_sigma2: {rust_float(fit_params['sigma2'])},",
+        f"    fit_loglike: {rust_float(fit.llf)},",
         f"    d: {d},",
         f"    mean: {rust_float(mean)},",
         f"    sigma2: {rust_float(sigma2)},",
@@ -269,6 +292,21 @@ pub struct ArmaCase {{
     pub forecast_mean: &'static [f64],
     /// `get_forecast({ARMA_HORIZON}).var_pred_mean` after the whole series.
     pub forecast_variance: &'static [f64],
+    /// `hannan_rissanen(w, p, q, unbiased=False)` AR and MA estimates on `w = diff(values, d)`,
+    /// demeaned when `fit_with_mean`. `None` when a value is missing.
+    pub hannan_rissanen: Option<(&'static [f64], &'static [f64])>,
+    /// Whether the fit estimates a mean: always for `d = 0`, and for `d = 1` with drift.
+    pub fit_with_mean: bool,
+    /// AR estimates of `ARIMA(diff(values, d), order=(p, 0, q), trend=...).fit()`.
+    pub fit_ar: &'static [f64],
+    /// MA estimates of the same fit.
+    pub fit_ma: &'static [f64],
+    /// The `const` estimate of the same fit, or 0.
+    pub fit_mean: f64,
+    /// The `sigma2` estimate of the same fit.
+    pub fit_sigma2: f64,
+    /// `llf` of the same fit.
+    pub fit_loglike: f64,
 }}
 
 /// All ARMA reference cases.
