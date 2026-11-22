@@ -6,10 +6,29 @@ mod time_series;
 /// Defines the estimator to use.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Estimator {
-    /// A biased estimator (sample based).
+    /// Divides by `n`: the statistics of the data itself.
     Biased,
-    /// An unbiased estimator (population based).
+    /// Divides by `n - 1`: the sample estimate of the population statistics.
     Unbiased,
+}
+
+/// Splits a series into its first `len - lag` and last `len - lag` values.
+///
+/// Returns [`None`] if `lag` is not less than the number of elements.
+fn lagged<'a>(values: &TimeSeries<'a>, lag: usize) -> Option<(TimeSeries<'a>, TimeSeries<'a>)> {
+    if lag >= values.len() {
+        return None;
+    }
+
+    let length = values.len() - lag;
+    let x = values.slice_stationary(..length).ok()?;
+    let y = values.slice_stationary(lag..).ok()?;
+    Some((x, y))
+}
+
+/// Sums the products of the residuals of two equally long series.
+fn cross_sum(x: &TimeSeries, y: &TimeSeries) -> f64 {
+    x.residuals().zip(y.residuals()).map(|(x, y)| x * y).sum()
 }
 
 /// Calculates the autocovariance with a given lag.
@@ -19,28 +38,10 @@ pub enum Estimator {
 /// * `lag` - The lag of the data. The lag must be less than the number of elements.
 ///
 /// ## Returns
-/// [`None`] if the values input is empty, or some value representing the autocovariance.
+/// [`None`] if the lag is too large or too few values remain for the estimator,
+/// or some value representing the autocovariance.
 pub fn acov<'a, T: Borrow<TimeSeries<'a>>>(values: T, lag: usize) -> Option<f64> {
-    let values = values.borrow();
-    if values.is_empty() {
-        return None;
-    }
-
-    if lag >= values.len() {
-        return None;
-    }
-
-    // Obtain the lag-shifted signals.
-    let length = values.len() - lag;
-    let x = values
-        .slice_stationary(..length)
-        .expect("time series has enough data points");
-    let y = values
-        .slice_stationary(lag..)
-        .expect("time series has enough data points");
-    debug_assert_eq!(x.len(), length);
-    debug_assert_eq!(y.len(), length);
-
+    let (x, y) = lagged(values.borrow(), lag)?;
     cov(x, y)
 }
 
@@ -51,63 +52,51 @@ pub fn acov<'a, T: Borrow<TimeSeries<'a>>>(values: T, lag: usize) -> Option<f64>
 /// * `y` - The second signal.
 ///
 /// ## Returns
-/// [`None`] if the values input is empty, or some value representing the covariance.
+/// [`None`] if the signals differ in length or, with [`Estimator::Unbiased`], hold
+/// fewer than two values; otherwise some value representing the covariance.
 pub fn cov<'x, 'y, X: Borrow<TimeSeries<'x>>, Y: Borrow<TimeSeries<'y>>>(
     x: X,
     y: Y,
 ) -> Option<f64> {
     let x = x.borrow();
     let y = y.borrow();
-    assert_eq!(x.len(), y.len());
     debug_assert_eq!(x.estimator(), y.estimator());
 
-    if x.is_empty() || x.len() != y.len() {
+    if x.len() != y.len() {
         return None;
     }
 
-    // Remove the mean from the original and the time-shifted signal.
-    let x_error = x.residuals();
-    let y_error = y.residuals();
-
-    // Calculate the covariance.
-    let tss: f64 = x_error.zip(y_error).map(|(x, y)| x * y).sum();
-
-    let length = x.len();
-    let phi = match x.estimator() {
-        Estimator::Unbiased => tss / (length - 1) as f64,
-        Estimator::Biased => tss / length as f64,
+    let divisor = match x.estimator() {
+        Estimator::Unbiased => x.len() - 1,
+        Estimator::Biased => x.len(),
     };
-    Some(phi)
+    if divisor == 0 {
+        return None;
+    }
+
+    Some(cross_sum(x, y) / divisor as f64)
 }
 
 /// Calculates the autocorrelation coefficient with a given lag.
+///
+/// Uses the standard estimate `sum((x_t - mean) * (x_t+lag - mean)) / sum((x_t - mean)^2)`,
+/// which always lies in `[-1, 1]`. The estimator of the series is not used.
 ///
 /// ## Arguments
 /// * `values` - The values to calculate the autocorrelation for. Assumed to be a stationary time series.
 /// * `lag` - The lag of the data. The lag must be less than the number of elements.
 ///
 /// ## Returns
-/// [`None`] if the values input is empty, or some value representing the autocorrelation.
+/// [`None`] if the lag is too large or the series is constant,
+/// or some value representing the autocorrelation.
 pub fn acorr<'a, T: Borrow<TimeSeries<'a>>>(values: T, lag: usize) -> Option<f64> {
     let values = values.borrow();
-    if values.is_empty() {
+    let (x, y) = lagged(values, lag)?;
+    let tss = cross_sum(values, values);
+    if tss == 0.0 {
         return None;
     }
-
-    if lag >= values.len() {
-        return None;
-    }
-
-    // Obtain the lag-shifted signals.
-    let length = values.len() - lag;
-    let x = values
-        .slice_stationary(..length)
-        .expect("time series has enough data points");
-    let y = values
-        .slice_stationary(lag..)
-        .expect("time series has enough data points");
-
-    corr(x, y)
+    Some(cross_sum(&x, &y) / tss)
 }
 
 /// Calculates the correlation coefficient.
@@ -117,71 +106,63 @@ pub fn acorr<'a, T: Borrow<TimeSeries<'a>>>(values: T, lag: usize) -> Option<f64
 /// * `y` - The second signal.
 ///
 /// ## Returns
-/// [`None`] if the values input is empty, or some value representing the correlation coefficient.
+/// [`None`] if the covariance is undefined or either signal is constant,
+/// or some value representing the correlation coefficient.
 pub fn corr<'x, 'y, X: Borrow<TimeSeries<'x>>, Y: Borrow<TimeSeries<'y>>>(
     x: X,
     y: Y,
 ) -> Option<f64> {
     let x = x.borrow();
     let y = y.borrow();
-    match cov(x, y) {
-        None => None,
-        Some(phi) => Some(phi / (x.std() * y.std())),
-    }
+    let std = x.std() * y.std();
+    cov(x, y).filter(|_| std != 0.0).map(|phi| phi / std)
 }
 
-/// Calculates the partial autocorrelation.
-pub fn pacf<'x, X: Borrow<TimeSeries<'x>>>(values: X, mut max_lags: usize) -> Option<Vec<f64>> {
+/// Calculates the partial autocorrelation for lags `0..=max_lags`.
+///
+/// `max_lags` is capped at `len - 1`.
+///
+/// ## Returns
+/// [`None`] if no lag can be computed (zero lags, a single value or a constant series),
+/// or the partial autocorrelations, starting with `1.0` for lag 0.
+pub fn pacf<'x, X: Borrow<TimeSeries<'x>>>(values: X, max_lags: usize) -> Option<Vec<f64>> {
     let values = values.borrow();
-    if values.is_empty() {
+    let max_lags = max_lags.min(values.len() - 1);
+    if max_lags == 0 {
         return None;
     }
 
-    max_lags = values.len().min(max_lags);
+    let acf = (1..=max_lags)
+        .map(|lag| acorr(values, lag))
+        .collect::<Option<Vec<_>>>()?;
+    Some(durbin_levinson(&acf))
+}
 
-    // Pre-calculate the auto-correlation values.
-    let mut acf = vec![f64::NAN; max_lags];
-    for lag in 0..max_lags {
-        acf[lag] = acorr(values, lag + 1).unwrap_or(0.0);
+/// Runs the Durbin-Levinson recursion.
+///
+/// `acf[k - 1]` holds the autocorrelation at lag `k`. Returns `[1.0, phi_11, phi_22, ...]`.
+fn durbin_levinson(acf: &[f64]) -> Vec<f64> {
+    let mut result = Vec::with_capacity(acf.len() + 1);
+    result.push(1.0);
+
+    // phi_{k-1, j} for j = 1..k-1, stored at index j - 1.
+    let mut prev: Vec<f64> = Vec::with_capacity(acf.len());
+    let mut curr: Vec<f64> = Vec::with_capacity(acf.len());
+
+    for k in 1..=acf.len() {
+        let num = acf[k - 1] - (1..k).map(|j| prev[j - 1] * acf[k - j - 1]).sum::<f64>();
+        let den = 1.0 - (1..k).map(|j| prev[j - 1] * acf[j - 1]).sum::<f64>();
+        let phi_kk = num / den;
+
+        curr.clear();
+        curr.extend((1..k).map(|j| prev[j - 1] - phi_kk * prev[k - j - 1]));
+        curr.push(phi_kk);
+        std::mem::swap(&mut prev, &mut curr);
+
+        result.push(phi_kk);
     }
 
-    let mut pacf = vec![f64::NAN; max_lags * max_lags]; // square matrix
-
-    // pacf[..max_lags].copy_from_slice(&acf);
-    pacf[0] = acf[0];
-
-    let idx = move |row, col| (row - 1) * max_lags + (col - 1); // MATLAB indexing
-
-    for p in 2..=max_lags {
-        let mut term = 0.0;
-        let mut term2 = 0.0;
-        for j in 1..=(p - 1) {
-            // Durbin recursion
-            let mut current = pacf[idx(p - 1, j)];
-            if current.is_nan() {
-                let a = pacf[idx(p - 2, j)];
-                let b = pacf[idx(p - 1, p - 1)];
-                let c = pacf[idx(p - 2, p - 1 - j)];
-
-                current = a - b * c;
-                pacf[idx(p - 1, j)] = current;
-            }
-
-            term += current * acf[p - j - (1)];
-            term2 += current * acf[j - (1)];
-        }
-
-        let d = acf[p - (1)];
-        let e = d - term;
-        let f = 1.0 - term2;
-        let value = e / f;
-        pacf[idx(p, p)] = value;
-    }
-
-    let diag = std::iter::once(1.0)
-        .chain((0..max_lags).map(|lag| pacf[lag * max_lags + lag]))
-        .collect();
-    Some(diag)
+    result
 }
 
 #[cfg(test)]
@@ -246,7 +227,7 @@ mod tests {
 
         let result = acorr(values, lag).unwrap();
 
-        let expected: f64 = -0.42778925619834696;
+        let expected: f64 = -0.380257116620753; // statsmodels acf
         assert_approx_eq!(f64, result, expected);
     }
 
@@ -258,20 +239,71 @@ mod tests {
 
         let result = pacf(values, max_lags).unwrap();
 
+        // statsmodels.tsa.stattools.pacf(y, nlags=10, method="ldb")
         let expected = [
             1.0,
-            1.0002038427670525,
-            3.870781320499196,
-            -1.3414313085242502,
-            -0.5864136419375363,
-            -0.39778721734123756,
-            -0.3281943113554122,
-            -0.3108059438334501,
-            -0.3322635124458095,
-            -0.4044370178199057,
-            -0.5921770731565059,
+            0.9992026377192385,
+            -0.9886934907501577,
+            0.6421864105266735,
+            0.3483789857330886,
+            0.18317292590771958,
+            0.06350364686564525,
+            -0.024538003187321095,
+            -0.08462920394055298,
+            -0.12177379316633868,
+            -0.14225955547380964,
         ];
-        assert_eq!(result, expected);
+        assert_eq!(result.len(), expected.len());
+        for (r, e) in result.iter().zip(expected) {
+            assert_approx_eq!(f64, *r, e, epsilon = 1e-9);
+        }
+    }
+
+    #[test]
+    fn test_acorr_is_bounded() {
+        // statsmodels acf
+        let expected = [1.0, 0.4, -0.1, -0.4, -0.4];
+        for estimator in [Estimator::Biased, Estimator::Unbiased] {
+            let values = TimeSeries::try_new(&[2.0, 4.0, 6.0, 8.0, 10.0], estimator).unwrap();
+            for (lag, e) in expected.iter().enumerate() {
+                assert_approx_eq!(f64, acorr(&values, lag).unwrap(), *e, epsilon = 1e-12);
+            }
+            assert_eq!(acorr(&values, 5), None);
+        }
+    }
+
+    #[test]
+    fn test_edge_cases_return_none() {
+        let short = TimeSeries::try_new(&[1.0, 2.0], Estimator::Unbiased).unwrap();
+        assert_eq!(acov(&short, 1), None);
+
+        let constant = TimeSeries::try_new(&[3.0; 5], Estimator::Unbiased).unwrap();
+        assert_eq!(acorr(&constant, 1), None);
+        assert_eq!(corr(&constant, &constant), None);
+        assert_eq!(pacf(&constant, 3), None);
+
+        let values = TimeSeries::try_new(&[2.0, 4.0, 6.0, 8.0, 10.0], Estimator::Unbiased).unwrap();
+        assert_eq!(pacf(&values, 0), None);
+        assert_eq!(cov(&short, &values), None);
+    }
+
+    #[test]
+    fn test_pacf_caps_lags() {
+        let values = TimeSeries::try_new(&[2.0, 4.0, 6.0, 8.0, 10.0], Estimator::Unbiased).unwrap();
+        let result = pacf(&values, usize::MAX).unwrap();
+        assert_eq!(result.len(), 5);
+        assert!(result.iter().all(|r| r.is_finite()));
+    }
+
+    #[test]
+    fn test_durbin_levinson_ar1() {
+        // An AR(1) process with phi = 0.5 has acf 0.5^k and pacf [1, 0.5, 0, 0, ...].
+        let acf: Vec<f64> = (1..=5).map(|k| 0.5_f64.powi(k)).collect();
+        let result = durbin_levinson(&acf);
+        let expected = [1.0, 0.5, 0.0, 0.0, 0.0, 0.0];
+        for (r, e) in result.iter().zip(expected) {
+            assert_approx_eq!(f64, *r, e, epsilon = 1e-12);
+        }
     }
 
     fn signal_gen(len: usize) -> Vec<f64> {
