@@ -21,6 +21,21 @@ pub struct Case {
     pub var_biased: f64,
     /// Variance divided by `n - 1`: `np.var(values, ddof=1)`.
     pub var_unbiased: f64,
+    /// The AR order of the fits below, `min(3, max_lags)`.
+    pub ar_order: usize,
+    /// `yule_walker(values, ar_order, method="mle")` coefficients.
+    pub yw_mle_phi: &'static [f64],
+    /// The square of the sigma that `yule_walker(..., method="mle")` returns.
+    pub yw_mle_sigma2: f64,
+    /// `yule_walker(values, ar_order, method="adjusted")` coefficients.
+    pub yw_adjusted_phi: &'static [f64],
+    /// The square of the sigma that `yule_walker(..., method="adjusted")` returns;
+    /// `NaN` where statsmodels found `sigma2 <= 0`.
+    pub yw_adjusted_sigma2: f64,
+    /// `burg(values, ar_order)` coefficients.
+    pub burg_phi: &'static [f64],
+    /// `burg(values, ar_order)` innovation variance.
+    pub burg_sigma2: f64,
 }
 
 /// All reference cases.
@@ -60,8 +75,23 @@ pub const RETURNS: Case = Case {
         -0.00017614285714285708,
         0.00013266666666666662,
     ],
+    yw_mle_phi: &[
+        -0.5986574995085148,
+        -0.4722281157920943,
+        -0.3577694942069905,
+    ],
+    yw_adjusted_phi: &[
+        -0.8036508735593995,
+        -0.7177612419020285,
+        -0.5740424207853919,
+    ],
+    burg_phi: &[-0.7374519612547827, -0.614442019352254, -0.4465710587237976],
     var_biased: 0.001089,
     var_unbiased: 0.00121,
+    ar_order: 3,
+    yw_mle_sigma2: 0.0007411655875311765,
+    yw_adjusted_sigma2: 0.0005120686080118036,
+    burg_sigma2: 0.0006545394082160967,
 };
 
 /// 200 samples of `y_t = 0.6 y_(t-1) - 0.3 y_(t-2) + e_t`, seed 20261122.
@@ -321,8 +351,27 @@ pub const AR2: Case = Case {
         0.033395491751866214,
         0.022134430641316143,
     ],
+    yw_mle_phi: &[
+        0.5725806320821643,
+        -0.2073454648311924,
+        -0.11567417664153147,
+    ],
+    yw_adjusted_phi: &[
+        0.576399146207814,
+        -0.20927755244962482,
+        -0.11752623752930826,
+    ],
+    burg_phi: &[
+        0.5830195434975901,
+        -0.2144464108032465,
+        -0.11492987029231702,
+    ],
     var_biased: 1.2682190262360278,
     var_unbiased: 1.2745919861668622,
+    ar_order: 3,
+    yw_mle_sigma2: 0.8961994558619726,
+    yw_adjusted_sigma2: 0.8912500236530447,
+    burg_sigma2: 0.8836102114650379,
 };
 
 /// 1000 samples of two overlaid sines (2.5 and 16 cycles).
@@ -1382,8 +1431,15 @@ pub const SINE: Case = Case {
         7.719070356098456,
         7.6300377694820325,
     ],
+    yw_mle_phi: &[2.6220333054898286, -2.264787104290395, 0.6421864105078675],
+    yw_adjusted_phi: &[2.3187323208700574, 0.01906116021747053, -1.3391646761052427],
+    burg_phi: &[2.9711461523454608, -2.95860394289661, 0.9874378314541584],
     var_biased: 8.116875,
     var_unbiased: 8.125,
+    ar_order: 3,
+    yw_mle_sigma2: 0.0001709531237015227,
+    yw_adjusted_sigma2: f64::NAN,
+    burg_sigma2: 4.7573941136661166e-06,
 };
 
 /// 50 samples of a noisy linear trend with slope 0.5, seed 7.
@@ -1493,6 +1549,21 @@ pub const TREND: Case = Case {
         30.939410850465396,
         27.962486894968105,
     ],
+    yw_mle_phi: &[
+        0.7891705236131462,
+        0.16193554947415564,
+        -0.02268145499494228,
+    ],
+    yw_adjusted_phi: &[
+        0.7569688912731866,
+        0.20936391846168834,
+        -0.017929100610912217,
+    ],
+    burg_phi: &[0.6961853089636995, 0.27769485619212864, 0.01354327468293646],
     var_biased: 54.48872505238911,
     var_unbiased: 55.600739849376644,
+    ar_order: 3,
+    yw_mle_sigma2: 8.365164598255824,
+    yw_adjusted_sigma2: 6.3954159837724225,
+    burg_sigma2: 1.6755453562038487,
 };
