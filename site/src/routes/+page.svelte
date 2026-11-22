@@ -23,7 +23,7 @@
 
 <header>
 	<p class="eyebrow">backshift</p>
-	<h1>ARIMA that runs where Python can't</h1>
+	<h1>Fit anywhere, forecast on anything</h1>
 	<p class="intro">
 		Seasonal ARIMA, fitted by exact maximum likelihood and checked against statsmodels to 1e-9, with a streaming
 		filter that needs no heap. Everything below runs in your browser through WebAssembly, from the same Rust code that
