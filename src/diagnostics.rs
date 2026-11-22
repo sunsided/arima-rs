@@ -59,7 +59,9 @@ pub fn ljung_box(residuals: &[f64], lags: usize, model_df: usize) -> Option<Test
             r * r / (n - k) as f64
         })
         .sum();
-    let statistic = (n * (n + 2)) as f64 * sum;
+    // In floating point: `n * (n + 2)` overflows a 32-bit `usize` from n = 65535.
+    let nf = n as f64;
+    let statistic = nf * (nf + 2.0) * sum;
 
     Some(TestResult {
         statistic,
@@ -393,6 +395,22 @@ mod tests {
         let twice = cumulative(&cumulative(&y));
         assert_eq!(ndiffs(&twice, 0.05, 2), 2);
         assert_eq!(ndiffs(&twice, 0.05, 3), 3);
+    }
+
+    #[test]
+    fn ljung_box_handles_more_values_than_a_32_bit_product() {
+        // Alternating signs: r_1 = -(n - 1) / n, so Q = (n + 2)(n - 1) / n.
+        let n = 70_000;
+        let x: std::vec::Vec<f64> = (0..n)
+            .map(|t| if t % 2 == 0 { 1.0 } else { -1.0 })
+            .collect();
+        let test = ljung_box(&x, 1, 0).unwrap();
+        let nf = f64::from(n);
+        let expected = (nf + 2.0) * (nf - 1.0) / nf;
+        assert!(
+            (test.statistic - expected).abs() < 1e-6 * expected,
+            "{test:?}"
+        );
     }
 
     #[test]

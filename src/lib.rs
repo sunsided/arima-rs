@@ -160,17 +160,15 @@ pub fn acov<'a, T: Borrow<TimeSeries<'a>>>(values: T, lag: usize) -> Option<f64>
 /// * `y` - The second signal.
 ///
 /// ## Returns
-/// [`None`] if the signals differ in length or, with [`Estimator::Unbiased`], hold
-/// fewer than two values; otherwise some value representing the covariance.
+/// [`None`] if the signals differ in length or estimator or, with [`Estimator::Unbiased`],
+/// hold fewer than two values; otherwise some value representing the covariance.
 pub fn cov<'x, 'y, X: Borrow<TimeSeries<'x>>, Y: Borrow<TimeSeries<'y>>>(
     x: X,
     y: Y,
 ) -> Option<f64> {
     let x = x.borrow();
     let y = y.borrow();
-    debug_assert_eq!(x.estimator(), y.estimator());
-
-    if x.len() != y.len() {
+    if x.len() != y.len() || x.estimator() != y.estimator() {
         return None;
     }
 
@@ -390,6 +388,9 @@ mod tests {
 
         let values = TimeSeries::try_new(&[2.0, 4.0, 6.0, 8.0, 10.0], Estimator::Unbiased).unwrap();
         assert_eq!(cov(&short, &values), None);
+
+        let biased = TimeSeries::try_new(&[2.0, 4.0, 6.0, 8.0, 10.0], Estimator::Biased).unwrap();
+        assert_eq!(cov(&values, &biased), None);
     }
 
     #[test]

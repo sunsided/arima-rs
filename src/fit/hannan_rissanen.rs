@@ -8,6 +8,7 @@
 //! with its default long-AR order `m = max(floor(ln(n)^2), 2 max(p, q))`. statsmodels'
 //! optional third, bias-correcting step is not needed for starting values.
 
+use crate::math::dot;
 use crate::{Estimator, TimeSeries, math, yule_walker};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -156,11 +157,6 @@ fn cholesky_solve(mut a: Vec<Vec<f64>>, mut c: Vec<f64>) -> Option<Vec<f64>> {
     }
 
     Some(c)
-}
-
-/// The dot product of two equally long slices.
-fn dot(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(a, b)| a * b).sum()
 }
 
 #[cfg(test)]

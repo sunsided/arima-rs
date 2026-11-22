@@ -38,6 +38,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   don't set.
 - Differencing inside the filter and the likelihood now applies the full polynomial `(1 - B)^d (1 - B^s)^D` in one
   step, which can change results for `d >= 2` in the last bits.
+- `FitError` gains `Degenerate`: a model that fits the series exactly (a constant series with a mean, a straight
+  line with a drift) has zero innovation variance, and `Arima::fit` now returns this error instead of a model with
+  `sigma2 = 0` and an infinite log-likelihood that `Filter::new` rejects.
+- `Arima::fit` and `fit_exog` treat infinite values in `y` or the regressors as missing, as `NaN` already was.
+- `cov` returns `None` for two series with different estimators instead of using the first one's.
+- `AutoArima` reports the error of the simplest failed candidate when no candidate fits, instead of
+  `TooShort { needed: 0, present: 0 }`.
+
+### Fixed
+
+- `Arima::fit_exog` and `AutoArima::fit_exog` no longer panic on an infinite value.
+- `ljung_box` overflowed `n * (n + 2)` on 32-bit targets (WASM, Cortex-M) from 65,535 residuals: a panic in debug
+  builds, a wrong statistic in release builds.
+- `TimeSeries::slice_stationary` returns `NotEnoughData` for an out-of-bounds range instead of panicking.
 
 ## [0.1.0] - 2026-11-22
 
