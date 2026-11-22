@@ -1,5 +1,5 @@
 [package]
-name = "arima"
+name = "backshift"
 version = "0.1.0"
 edition = "2021"
 # `core::error::Error` is stable since 1.81.
