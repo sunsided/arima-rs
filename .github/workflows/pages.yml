@@ -1,8 +1,8 @@
 name: Deploy Pages
 
 # Builds the demo site (the wasm package + SvelteKit) and publishes it to GitHub Pages
-# on every push to main. A newer push cancels a run still in flight, so the site always
-# ends up at the most recent push. Pull requests build the site in ci.yml.
+# on every push to main. Runs queue rather than cancel each other, so the site ends up
+# at the most recent push. Pull requests build the site in ci.yml.
 
 on:
   push:
@@ -12,7 +12,8 @@ on:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  # Never cancel a deployment in flight: that can leave the environment stuck. Newer runs queue.
+  cancel-in-progress: false
 
 permissions: {}
 

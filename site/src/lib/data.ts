@@ -88,6 +88,9 @@ export function regimeChange(n: number, change: number, before: number, after: n
 	return y;
 }
 
+/** A field separator: a comma, semicolon or tab with any spaces after it, or spaces. */
+const FIELD = /[,;\t] *| +/;
+
 /** The most values a pasted series may have, as the package accepts. */
 export const MAX_VALUES = 100_000;
 
@@ -99,10 +102,10 @@ export const MAX_VALUES = 100_000;
 export function parseSeries(text: string): { values: number[] } | { error: string } {
 	let lines = text.split(/\r?\n/).filter((line) => line.trim() !== '');
 	// A single line holds the whole series, one value per field.
-	if (lines.length === 1) lines = lines[0].split(/[,;\t]| +/);
+	if (lines.length === 1) lines = lines[0].split(FIELD);
 	const values: number[] = [];
 	for (const [index, line] of lines.entries()) {
-		const fields = line.split(/[,;\t]| +/).map((field) => field.trim());
+		const fields = line.split(FIELD).map((field) => field.trim());
 		const field = fields[fields.length - 1];
 		if (/^(|na|nan|null)$/i.test(field)) {
 			values.push(Number.NaN);

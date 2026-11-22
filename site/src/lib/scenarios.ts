@@ -46,8 +46,30 @@ export function forecastScenario(
 		: api.Model.autoArima(history, period);
 	const fitMillis = performance.now() - started;
 
-	const wide = model.forecast(history, horizon, 0.95);
-	const narrow = model.forecast(history, horizon, 0.8);
+	// Free the wasm objects even when a forecast throws (a model too large to stream).
+	let wide: Backshift.Forecast | undefined;
+	let narrow: Backshift.Forecast | undefined;
+	try {
+		wide = model.forecast(history, horizon, 0.95);
+		narrow = model.forecast(history, horizon, 0.8);
+		return forecastResult(model, values, horizon, fitMillis, wide, narrow, size);
+	} finally {
+		wide?.free();
+		narrow?.free();
+		model.free();
+	}
+}
+
+/** The chart and statistics of a fitted model and its two forecasts. */
+function forecastResult(
+	model: Backshift.Model,
+	values: number[],
+	horizon: number,
+	fitMillis: number,
+	wide: Backshift.Forecast,
+	narrow: Backshift.Forecast,
+	size: { width: number; height: number }
+): ForecastResult {
 	const n = values.length;
 	const ahead = Array.from({ length: horizon }, (_, h) => n + h);
 	// The forecast line starts at the last observation, so it reads as a continuation.
@@ -70,9 +92,6 @@ export function forecastScenario(
 			markers: [{ x: n - 1, label: 'now' }]
 		}
 	};
-	model.free();
-	wide.free();
-	narrow.free();
 	return result;
 }
 

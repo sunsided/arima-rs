@@ -32,9 +32,15 @@
 	let latest = 0;
 	let ticker = 0;
 
-	/** A fresh worker that reports to this panel. */
+	/** A fresh worker that reports to this panel; a worker that fails ends the fit with an error. */
 	function spawn(): Worker {
 		const next = new Worker(new URL('../fit.worker.ts', import.meta.url), { type: 'module' });
+		next.onerror = (event) => {
+			event.preventDefault();
+			error = `the fitting worker failed${event.message ? `: ${event.message}` : ''}`;
+			worker = null;
+			idle();
+		};
 		next.onmessage = ({ data }: MessageEvent<FitResponse>) => {
 			// A cancelled request can still answer; only the latest one counts.
 			if (data.id !== latest) return;
@@ -70,7 +76,12 @@
 		// Wasm cannot be interrupted, so cancelling a running fit means a new worker.
 		if (busySince !== null || !worker) {
 			worker?.terminate();
-			worker = spawn();
+			try {
+				worker = spawn();
+			} catch (e) {
+				error = `cannot start a worker: ${e instanceof Error ? e.message : String(e)}`;
+				return;
+			}
 		}
 
 		const request: FitRequest = {
