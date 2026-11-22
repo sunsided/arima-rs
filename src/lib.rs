@@ -33,16 +33,24 @@ fn cross_sum(x: &TimeSeries, y: &TimeSeries) -> f64 {
 
 /// Calculates the autocovariance with a given lag.
 ///
+/// Matches statsmodels `acovf`: [`Estimator::Unbiased`] divides by `n - lag`
+/// (`adjusted=True`), [`Estimator::Biased`] divides by `n`. With `Biased`,
+/// `acov(x, k) / acov(x, 0) == acorr(x, k)`.
+///
 /// ## Arguments
 /// * `values` - The values to calculate the autocovariance for.
 /// * `lag` - The lag of the data. The lag must be less than the number of elements.
 ///
 /// ## Returns
-/// [`None`] if the lag is too large or too few values remain for the estimator,
-/// or some value representing the autocovariance.
+/// [`None`] if the lag is too large, or some value representing the autocovariance.
 pub fn acov<'a, T: Borrow<TimeSeries<'a>>>(values: T, lag: usize) -> Option<f64> {
-    let (x, y) = lagged(values.borrow(), lag)?;
-    cov(x, y)
+    let values = values.borrow();
+    let (x, y) = lagged(values, lag)?;
+    let divisor = match values.estimator() {
+        Estimator::Unbiased => x.len(),
+        Estimator::Biased => values.len(),
+    };
+    Some(cross_sum(&x, &y) / divisor as f64)
 }
 
 /// Calculates the covariance.
@@ -93,7 +101,7 @@ pub fn acorr<'a, T: Borrow<TimeSeries<'a>>>(values: T, lag: usize) -> Option<f64
     let values = values.borrow();
     let (x, y) = lagged(values, lag)?;
     let tss = cross_sum(values, values);
-    if tss == 0.0 {
+    if !tss.is_finite() || tss == 0.0 {
         return None;
     }
     Some(cross_sum(&x, &y) / tss)
@@ -115,7 +123,9 @@ pub fn corr<'x, 'y, X: Borrow<TimeSeries<'x>>, Y: Borrow<TimeSeries<'y>>>(
     let x = x.borrow();
     let y = y.borrow();
     let std = x.std() * y.std();
-    cov(x, y).filter(|_| std != 0.0).map(|phi| phi / std)
+    cov(x, y)
+        .filter(|_| std.is_finite() && std != 0.0)
+        .map(|phi| phi / std)
 }
 
 /// Calculates the partial autocorrelation for lags `0..=max_lags`.
@@ -178,7 +188,7 @@ mod tests {
 
         let result = acov(values, lag).unwrap();
 
-        let expected: f64 = -2.0;
+        let expected: f64 = -4.0 / 3.0; // statsmodels acovf(adjusted=True)
         assert_approx_eq!(f64, result, expected);
     }
 
@@ -192,7 +202,7 @@ mod tests {
 
         let result = acov(values, lag).unwrap();
 
-        let expected: f64 = -0.0005176249999999999;
+        let expected: f64 = -0.00046011111111111095; // statsmodels acovf(adjusted=True)
         assert_approx_eq!(f64, result, expected);
     }
 
@@ -273,9 +283,31 @@ mod tests {
     }
 
     #[test]
+    fn test_acov_biased_matches_acorr() {
+        let values = TimeSeries::try_new(&[2.0, 4.0, 6.0, 8.0, 10.0], Estimator::Biased).unwrap();
+        // statsmodels acovf(adjusted=False)
+        for (lag, e) in [8.0, 3.2, -0.8].iter().enumerate() {
+            assert_approx_eq!(f64, acov(&values, lag).unwrap(), *e, epsilon = 1e-12);
+        }
+        let c0 = acov(&values, 0).unwrap();
+        for lag in 0..5 {
+            let ratio = acov(&values, lag).unwrap() / c0;
+            assert_approx_eq!(f64, ratio, acorr(&values, lag).unwrap(), epsilon = 1e-12);
+        }
+        assert!(acov(&values, 4).is_some());
+    }
+
+    #[test]
+    fn test_non_finite_returns_none() {
+        let values = TimeSeries::try_new(&[1.0, f64::NAN, 3.0], Estimator::Unbiased).unwrap();
+        assert_eq!(acorr(&values, 1), None);
+        assert_eq!(corr(&values, &values), None);
+    }
+
+    #[test]
     fn test_edge_cases_return_none() {
         let short = TimeSeries::try_new(&[1.0, 2.0], Estimator::Unbiased).unwrap();
-        assert_eq!(acov(&short, 1), None);
+        assert_eq!(acov(&short, 2), None);
 
         let constant = TimeSeries::try_new(&[3.0; 5], Estimator::Unbiased).unwrap();
         assert_eq!(acorr(&constant, 1), None);
