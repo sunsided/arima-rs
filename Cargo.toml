@@ -4,16 +4,24 @@ version = "0.1.0"
 edition = "2021"
 # `core::error::Error` is stable since 1.81.
 rust-version = "1.81"
+exclude = ["/ci"]
 
 [features]
 default = ["std"]
-# Use the standard library's floating-point functions.
-std = []
+# Use the standard library's floating-point functions. Implies `alloc`.
+std = ["alloc"]
+# Enable the functions that return a `Vec`. Without it the crate needs no global allocator.
+alloc = []
 # Use the pure-Rust `libm` crate on `no_std` targets.
 libm = ["dep:libm"]
 
 [dependencies]
 libm = { version = "0.2.16", optional = true }
+
+[[test]]
+name = "it"
+path = "tests/it/main.rs"
+required-features = ["alloc"]
 
 [dev-dependencies]
 float-cmp = "0.9.0"

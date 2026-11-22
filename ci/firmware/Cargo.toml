@@ -1,0 +1,19 @@
+# A bare-metal binary that links backshift without a global allocator.
+# CI builds it for thumbv7em-none-eabihf; it is never run.
+[package]
+name = "backshift-firmware-check"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+backshift = { path = "../..", default-features = false, features = ["libm"] }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+
+# Keep this crate out of any parent workspace.
+[workspace]
