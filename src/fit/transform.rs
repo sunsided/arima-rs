@@ -10,14 +10,14 @@ use crate::math;
 use alloc::vec;
 use alloc::vec::Vec;
 
-/// The `y` coefficients of statsmodels' step-up recursion for the unconstrained `x`.
+/// Writes the `y` coefficients of statsmodels' step-up recursion for the unconstrained
+/// `x` into `out`, with `work` as scratch. Both hold at least `x.len()` values.
 ///
 /// Callers negate the result for AR coefficients and keep it for MA coefficients,
 /// as statsmodels SARIMAX does.
-pub(crate) fn constrain(x: &[f64]) -> Vec<f64> {
+pub(crate) fn constrain(x: &[f64], out: &mut [f64], work: &mut [f64]) {
     let n = x.len();
-    let mut prev = vec![0.0; n];
-    let mut curr = vec![0.0; n];
+    let (prev, curr) = (&mut out[..n], &mut work[..n]);
     for k in 0..n {
         let r = x[k] / math::sqrt(1.0 + x[k] * x[k]);
         for i in 0..k {
@@ -27,8 +27,6 @@ pub(crate) fn constrain(x: &[f64]) -> Vec<f64> {
         curr[k] = r;
         prev[..=k].copy_from_slice(&curr[..=k]);
     }
-
-    prev
 }
 
 /// The inverse of [`constrain`]. Returns [`None`] if `y` is not stationary, so some
@@ -59,10 +57,17 @@ mod tests {
     use super::*;
     use float_cmp::assert_approx_eq;
 
+    /// [`constrain`] into a fresh vector.
+    fn constrained(x: &[f64]) -> Vec<f64> {
+        let (mut out, mut work) = (vec![0.0; x.len()], vec![0.0; x.len()]);
+        constrain(x, &mut out, &mut work);
+        out
+    }
+
     #[test]
     fn matches_statsmodels() {
         // statsmodels constrain_stationary_univariate([0.5, -1.2, 2.0]) is -y.
-        let y = constrain(&[0.5, -1.2, 2.0]);
+        let y = constrained(&[0.5, -1.2, 2.0]);
         let expected = [0.5834634062650049, 0.6755097914363262, -0.8944271909999159];
         for (a, e) in y.iter().zip(expected) {
             assert_approx_eq!(f64, -a, e, epsilon = 1e-15);
@@ -72,7 +77,7 @@ mod tests {
     #[test]
     fn round_trips() {
         let x = [0.3, -2.5, 1.1, 0.0];
-        let back = unconstrain(&constrain(&x)).unwrap();
+        let back = unconstrain(&constrained(&x)).unwrap();
         for (a, b) in x.iter().zip(&back) {
             assert_approx_eq!(f64, *a, *b, epsilon = 1e-10);
         }

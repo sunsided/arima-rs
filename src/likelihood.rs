@@ -1,9 +1,10 @@
 //! The exact Gaussian log-likelihood of an ARIMA model, for any state dimension.
 //!
 //! This is the runtime-sized twin of [`Filter`](crate::Filter): the same recursion
-//! from [`state_space`](crate::state_space), on `Vec` buffers sized to the model.
+//! from [`state_space`](crate::state_space), on caller-owned buffers sized to the model.
 //! The series is differenced first (simple differencing, as R's `arima` does).
 
+use crate::buffer::take;
 use crate::filter::{ArimaSpec, FilterError};
 use crate::state_space::{self, Innovation, LyapunovScratch, System};
 use crate::{math, polynomial};
@@ -47,8 +48,9 @@ pub fn innovations_exog(
     spec: &ArimaSpec<'_>,
 ) -> Result<Vec<Innovation>, FilterError> {
     let w = demeaned_difference(&regressed(y, regressors, spec.exog), spec);
+    let mut buffer = vec![0.0; workspace_len(spec.arma_states())];
     let mut result = Vec::with_capacity(w.len());
-    Workspace::new(spec)?.run(&w, |innovation| result.push(innovation));
+    Workspace::new(spec, &mut buffer)?.run(&w, |innovation| result.push(innovation));
 
     Ok(result)
 }
@@ -102,7 +104,8 @@ pub fn loglike_exog(
     let w = demeaned_difference(&regressed(y, regressors, spec.exog), spec);
     let ln_two_pi = math::ln(core::f64::consts::TAU);
     let mut sum = 0.0;
-    Workspace::new(spec)?.run(&w, |Innovation { value, variance }| {
+    let mut buffer = vec![0.0; workspace_len(spec.arma_states())];
+    Workspace::new(spec, &mut buffer)?.run(&w, |Innovation { value, variance }| {
         if !value.is_nan() {
             sum += ln_two_pi + math::ln(variance) + value * value / variance;
         }
@@ -124,10 +127,13 @@ pub fn loglike_exog(
 /// same maximum as the full likelihood, or [`None`] if the model is invalid, no
 /// value is present, or `sigma2` is not positive and finite (the model fits `w` exactly, or
 /// the values are so large that their squares overflow).
+///
+/// `buffer` is scratch for the filter, at least [`workspace_len`] of the model's states.
 pub(crate) fn concentrated(
     w: &[f64],
     shape: &ArimaSpec<'_>,
     steady: bool,
+    buffer: &mut [f64],
 ) -> Option<(f64, f64, usize)> {
     let spec = ArimaSpec {
         d: 0,
@@ -143,7 +149,7 @@ pub(crate) fn concentrated(
             weighted += value * value / variance;
         }
     };
-    let workspace = Workspace::new(&spec).ok()?;
+    let workspace = Workspace::new(&spec, buffer).ok()?;
     if steady {
         workspace.run_steady(w, sink);
     } else {
@@ -212,47 +218,65 @@ pub(crate) fn differenced(y: &[f64], spec: &ArimaSpec<'_>) -> Vec<f64> {
 /// which the filter counts as converged.
 const STEADY_STATE_TOLERANCE: f64 = 1e-19;
 
-/// Heap buffers for one filter run, sized to the model's state dimension `r`.
-struct Workspace {
+/// The number of values a [`Workspace`] for `r` states borrows: five vectors of length
+/// `r` and four `r x r` matrices.
+pub(crate) const fn workspace_len(r: usize) -> usize {
+    5 * r + 4 * r * r
+}
+
+/// Buffers for one filter run, carved out of one caller-owned slice and sized to the
+/// model's state dimension `r`.
+struct Workspace<'b> {
     /// The padded first column of the transition matrix. Length `r`.
-    phi: Vec<f64>,
+    phi: &'b mut [f64],
     /// The padded selection vector. Length `r`.
-    selection: Vec<f64>,
+    selection: &'b mut [f64],
     /// The innovation variance.
     sigma2: f64,
     /// The predicted state. Length `r`.
-    a: Vec<f64>,
+    a: &'b mut [f64],
     /// The predicted state covariance, `r x r` row-major.
-    p: Vec<f64>,
+    p: &'b mut [f64],
     /// Scratch for the recursion. Length `r`.
-    scratch: Vec<f64>,
+    scratch: &'b mut [f64],
+    /// The frozen gain of [`Workspace::run_steady`]. Length `r`.
+    gain: &'b mut [f64],
 }
 
-impl Workspace {
-    /// Allocates the buffers and computes the stationary starting covariance.
-    fn new(spec: &ArimaSpec<'_>) -> Result<Self, FilterError> {
+impl<'b> Workspace<'b> {
+    /// Carves the buffers out of `buffer` and computes the stationary starting covariance.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `buffer` holds fewer than [`workspace_len`] values for the model's states.
+    fn new(spec: &ArimaSpec<'_>, buffer: &'b mut [f64]) -> Result<Self, FilterError> {
         spec.validate()?;
         let r = spec.arma_states();
-        let mut workspace = Self {
-            phi: vec![0.0; r],
-            selection: vec![0.0; r],
-            sigma2: spec.sigma2,
-            a: vec![0.0; r],
-            p: vec![0.0; r * r],
-            scratch: vec![0.0; r],
-        };
-        let mut delta = vec![0.0; spec.differencing_order() + 1];
-        spec.expand_into(&mut workspace.phi, &mut workspace.selection, &mut delta);
+        let mut buffer = &mut buffer[..workspace_len(r)];
+        buffer.fill(0.0);
 
-        let (mut power, mut product, mut term) =
-            (vec![0.0; r * r], vec![0.0; r * r], vec![0.0; r * r]);
-        let scratch = LyapunovScratch {
-            power: &mut power,
-            product: &mut product,
-            term: &mut term,
+        let workspace = Self {
+            phi: take(&mut buffer, r),
+            selection: take(&mut buffer, r),
+            sigma2: spec.sigma2,
+            a: take(&mut buffer, r),
+            p: take(&mut buffer, r * r),
+            scratch: take(&mut buffer, r),
+            gain: take(&mut buffer, r),
         };
-        let (system, _, p, _) = workspace.parts();
-        if !state_space::stationary_covariance(system, p, r, scratch) {
+        spec.expand_arma_into(workspace.phi, workspace.selection);
+
+        let scratch = LyapunovScratch {
+            power: take(&mut buffer, r * r),
+            product: take(&mut buffer, r * r),
+            term: buffer,
+        };
+        let system = System {
+            phi: workspace.phi,
+            selection: workspace.selection,
+            sigma2: workspace.sigma2,
+        };
+        if !state_space::stationary_covariance(system, workspace.p, r, scratch) {
             return Err(FilterError::NonStationary);
         }
 
@@ -260,9 +284,22 @@ impl Workspace {
     }
 
     /// Feeds every observation and hands each innovation to `sink`.
-    fn run(mut self, y: &[f64], mut sink: impl FnMut(Innovation)) {
-        let r = self.phi.len();
-        let (system, a, p, scratch) = self.parts();
+    fn run(self, y: &[f64], mut sink: impl FnMut(Innovation)) {
+        let Self {
+            phi,
+            selection,
+            sigma2,
+            a,
+            p,
+            scratch,
+            ..
+        } = self;
+        let r = phi.len();
+        let system = System {
+            phi,
+            selection,
+            sigma2,
+        };
         for &value in y {
             sink(state_space::update(r, a, p, r, value, scratch));
             state_space::predict(system, a, p, r, scratch);
@@ -276,17 +313,29 @@ impl Workspace {
     /// statsmodels takes the same shortcut by default; it moves results by about 1e-9, so
     /// it is used for the fitting objective only. A missing value after convergence resumes
     /// the full recursion from the frozen (still valid) covariance.
-    fn run_steady(mut self, y: &[f64], mut sink: impl FnMut(Innovation)) {
-        let r = self.phi.len();
-        let (system, a, p, scratch) = self.parts();
+    fn run_steady(self, y: &[f64], mut sink: impl FnMut(Innovation)) {
+        let Self {
+            phi,
+            selection,
+            sigma2,
+            a,
+            p,
+            scratch,
+            gain,
+        } = self;
+        let r = phi.len();
+        let system = System {
+            phi,
+            selection,
+            sigma2,
+        };
         let mut steady = false;
-        let mut gain = vec![0.0; r];
         let mut previous = f64::NAN;
         for &value in y {
             if steady && !value.is_nan() {
                 let variance = p[0];
                 let innovation = value - a[0];
-                for (state, k) in a.iter_mut().zip(&gain) {
+                for (state, k) in a.iter_mut().zip(gain.iter()) {
                     *state += k * innovation / variance;
                 }
 
@@ -314,16 +363,5 @@ impl Workspace {
 
             previous = p[0];
         }
-    }
-
-    /// Splits the workspace into the system matrices, the state, the covariance and scratch.
-    fn parts(&mut self) -> (System<'_>, &mut [f64], &mut [f64], &mut [f64]) {
-        let system = System {
-            phi: &self.phi,
-            selection: &self.selection,
-            sigma2: self.sigma2,
-        };
-
-        (system, &mut self.a, &mut self.p, &mut self.scratch)
     }
 }
