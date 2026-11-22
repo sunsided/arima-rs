@@ -264,7 +264,7 @@ Versions are as in ROADMAP §1 unless they are new here.
 
 | Tool | Period detection | MSTL | STL + model forecast | Fourier / DHR | TBATS | Fixed / initial params | `no_std` |
 |---|---|---|---|---|---|---|---|
-| backshift 0.2.0 | no | no (single `stl`, window fixed at 7) | no | regressors yes (`fit_exog`); no generator | no | warm start via `refit` only | yes (filter, refit) |
+| backshift 0.2.1 | no | no (single `stl`, window fixed at 7) | no | regressors yes (`fit_exog`); no generator | no | warm start via `refit` only | yes (filter, refit) |
 | foresight 0.7.3 | no (period from `Series::new`, `src/series.rs:27`) | yes, robust option (`src/decompose.rs:1-3`, :148); checked against R to 1e-10 (`tests/against_r.rs:744`) | yes, any model incl. ARIMA (`src/models/decomposed.rs:8-30`) | `regressors::fourier(period: f64, order, rows)` (`src/regressors.rs:51`) | yes | fixes `d`/`D`; internal warm start | no |
 | anofox-forecast 0.21.0 | yes: Welch, SAZED behind a feature | yes (`src/seasonality/mstl.rs`) | yes, ETS/SES/Linear/Naive trend, no ARIMA | Prophet-style (`src/seasonality/fourier.rs:1`) | yes | `with_coefficients` (no re-fit) | no |
 | augurs 0.10.3 | `augurs-seasons` (Welch) | `augurs-mstl` through `stlrs` 0.4.0, f32 (`src/lib.rs:103`) | yes, ETS trend; no ARIMA | inside `augurs-prophet` only | no | – | no |
