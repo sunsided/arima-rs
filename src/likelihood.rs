@@ -4,10 +4,9 @@
 //! from [`state_space`](crate::state_space), on `Vec` buffers sized to the model.
 //! The series is differenced first (simple differencing, as R's `arima` does).
 
-use crate::difference::difference;
 use crate::filter::{ArimaSpec, FilterError};
-use crate::math;
 use crate::state_space::{self, Innovation, LyapunovScratch, System};
+use crate::{math, polynomial};
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -51,7 +50,7 @@ pub fn innovations(y: &[f64], spec: &ArimaSpec<'_>) -> Result<Vec<Innovation>, F
 /// use backshift::{loglike, ArimaSpec};
 ///
 /// // White noise with variance 1: each term is ln(2 pi) + y^2.
-/// let spec = ArimaSpec { ar: &[], d: 0, ma: &[], mean: 0.0, sigma2: 1.0 };
+/// let spec = ArimaSpec::default();
 /// let llf = loglike(&[0.0, 0.0], &spec).unwrap();
 /// assert!((llf + std::f64::consts::TAU.ln()).abs() < 1e-12);
 /// ```
@@ -68,20 +67,20 @@ pub fn loglike(y: &[f64], spec: &ArimaSpec<'_>) -> Result<f64, FilterError> {
     Ok(-0.5 * sum)
 }
 
-/// The log-likelihood of the ARMA series `w` with `sigma2` concentrated out.
+/// The log-likelihood of the already differenced, demeaned series `w` under the ARMA part
+/// of `shape` (its AR and MA terms, seasonal ones included), with `sigma2` concentrated out.
 ///
 /// All innovation variances scale with `sigma2`, so the filter runs once with
 /// `sigma2 = 1`, and the maximising `sigma2 = sum(v_t^2 / F_t) / n` follows in closed
 /// form over the `n` non-missing values. Returns `(log-likelihood, sigma2, n)`, the
 /// same maximum as the full likelihood, or [`None`] if the model is invalid or no
 /// value is present.
-pub(crate) fn concentrated(w: &[f64], ar: &[f64], ma: &[f64]) -> Option<(f64, f64, usize)> {
+pub(crate) fn concentrated(w: &[f64], shape: &ArimaSpec<'_>) -> Option<(f64, f64, usize)> {
     let spec = ArimaSpec {
-        ar,
         d: 0,
-        ma,
         mean: 0.0,
         sigma2: 1.0,
+        ..*shape
     };
     let (mut count, mut log_variances, mut weighted) = (0_usize, 0.0, 0.0);
     Workspace::new(&spec)
@@ -105,14 +104,26 @@ pub(crate) fn concentrated(w: &[f64], ar: &[f64], ma: &[f64]) -> Option<(f64, f6
     Some((llf, sigma2, count))
 }
 
-/// `diff(y, d) - mean`: the series the ARMA part models.
+/// `(1 - B)^d (1 - B^s)^D y - mean`: the series the ARMA part models.
 fn demeaned_difference(y: &[f64], spec: &ArimaSpec<'_>) -> Vec<f64> {
-    let mut w = difference(y, spec.d);
+    let mut w = differenced(y, spec);
     for value in &mut w {
         *value -= spec.mean;
     }
 
     w
+}
+
+/// `(1 - B)^d (1 - B^s)^D y`, through the same arithmetic as [`Filter`](crate::Filter):
+/// `y.len() - k` values for `k = d + D s`, or none if `y` is shorter.
+pub(crate) fn differenced(y: &[f64], spec: &ArimaSpec<'_>) -> Vec<f64> {
+    let k = spec.differencing_order();
+    let mut delta = vec![0.0; k + 1];
+    polynomial::differencing(spec.d, spec.seasonal.d, spec.seasonal.period, &mut delta);
+
+    (k..y.len())
+        .map(|t| polynomial::apply(&delta, y[t], (1..=k).map(|j| y[t - j])))
+        .collect()
 }
 
 /// Heap buffers for one filter run, sized to the model's state dimension `r`.
@@ -144,7 +155,8 @@ impl Workspace {
             p: vec![0.0; r * r],
             scratch: vec![0.0; r],
         };
-        spec.pad_into(&mut workspace.phi, &mut workspace.selection);
+        let mut delta = vec![0.0; spec.differencing_order() + 1];
+        spec.expand_into(&mut workspace.phi, &mut workspace.selection, &mut delta);
 
         let (mut power, mut product, mut term) =
             (vec![0.0; r * r], vec![0.0; r * r], vec![0.0; r * r]);

@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Seasonal ARIMA(p, d, q)(P, D, Q, s): `Seasonal` in `ArimaSpec`, `Arima::seasonal`, and seasonal fields on
+  `Fitted`. The filter expands the seasonal polynomials into its own arrays, so it stays heap-free.
+
+### Changed
+
+- `ArimaSpec` gains a `seasonal` field and implements `Default`; write `..ArimaSpec::default()` for the fields you
+  don't set.
+- Differencing inside the filter and the likelihood now applies the full polynomial `(1 - B)^d (1 - B^s)^D` in one
+  step, which can change results for `d >= 2` in the last bits.
+
 ## [0.1.0] - 2026-11-22
 
 ### Added

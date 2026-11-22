@@ -57,7 +57,7 @@ extern crate std;
 pub use crate::autoregressive::{ArCoefficients, burg, yule_walker};
 #[cfg(feature = "alloc")]
 pub use crate::difference::{difference, integrate};
-pub use crate::filter::{ArimaSpec, Filter, FilterError};
+pub use crate::filter::{ArimaSpec, Filter, FilterError, Seasonal};
 #[cfg(feature = "alloc")]
 pub use crate::fit::{Arima, ArmaCoefficients, FitError, Fitted, hannan_rissanen};
 #[cfg(feature = "alloc")]
@@ -80,6 +80,7 @@ mod fit;
 mod likelihood;
 mod math;
 mod normal;
+mod polynomial;
 mod state_space;
 mod time_series;
 

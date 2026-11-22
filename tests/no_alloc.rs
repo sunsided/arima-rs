@@ -45,6 +45,7 @@ fn main() {
         ma: &[0.4],
         mean: 0.1,
         sigma2: 1.3,
+        ..ArimaSpec::default()
     };
     let mut filter = Filter::<4>::new(&spec).expect("stationary model");
     filter.warm_up(&history);

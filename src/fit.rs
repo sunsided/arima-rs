@@ -21,15 +21,15 @@ mod transform;
 
 pub use hannan_rissanen::{ArmaCoefficients, hannan_rissanen};
 
-use crate::difference::difference;
-use crate::filter::ArimaSpec;
-use crate::likelihood::concentrated;
+use crate::filter::{ArimaSpec, Seasonal};
+use crate::likelihood::{concentrated, differenced};
 use crate::math;
+use alloc::vec;
 use alloc::vec::Vec;
 use core::error::Error;
 use core::fmt::{Display, Formatter};
 
-/// An ARIMA(p, d, q) model to fit.
+/// A seasonal ARIMA(p, d, q)(P, D, Q, s) model to fit.
 ///
 /// # Examples
 ///
@@ -40,6 +40,10 @@ use core::fmt::{Display, Formatter};
 /// let fitted = Arima::new(1, 0, 0).fit(&y).unwrap();
 /// assert!(fitted.ar[0].abs() < 1.0);
 /// assert!(fitted.sigma2 > 0.0);
+///
+/// // ARIMA(1, 0, 0)(1, 0, 0, 4) on the same series.
+/// let seasonal = Arima::new(1, 0, 0).seasonal(1, 0, 0, 4).fit(&y).unwrap();
+/// assert_eq!(seasonal.seasonal_ar.len(), 1);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Arima {
@@ -49,25 +53,73 @@ pub struct Arima {
     d: usize,
     /// The MA order.
     q: usize,
+    /// The seasonal AR order.
+    seasonal_p: usize,
+    /// The seasonal differencing order.
+    seasonal_d: usize,
+    /// The seasonal MA order.
+    seasonal_q: usize,
+    /// The season length; 0 without a seasonal part.
+    period: usize,
     /// Whether to estimate the mean of the differenced series.
     mean: bool,
 }
 
+/// Constrained parameters, in the order the optimiser stores them unconstrained.
+struct Parameters {
+    /// The AR coefficients.
+    ar: Vec<f64>,
+    /// The MA coefficients.
+    ma: Vec<f64>,
+    /// The seasonal AR coefficients.
+    seasonal_ar: Vec<f64>,
+    /// The seasonal MA coefficients.
+    seasonal_ma: Vec<f64>,
+    /// The mean of the differenced series, or 0.
+    mean: f64,
+}
+
 impl Arima {
-    /// An ARIMA(`p`, `d`, `q`) model. It estimates a mean for `d = 0` and none otherwise,
-    /// like statsmodels ARIMA and R's `arima`; change that with [`Arima::mean`].
+    /// An ARIMA(`p`, `d`, `q`) model. It estimates a mean for `d = D = 0` and none
+    /// otherwise, like statsmodels ARIMA and R's `arima`; change that with [`Arima::mean`].
     #[must_use]
     pub fn new(p: usize, d: usize, q: usize) -> Self {
         Self {
             p,
             d,
             q,
+            seasonal_p: 0,
+            seasonal_d: 0,
+            seasonal_q: 0,
+            period: 0,
             mean: d == 0,
         }
     }
 
-    /// Whether to estimate the mean of the differenced series: the mean for `d = 0`,
-    /// the drift for `d = 1`.
+    /// Adds a seasonal part `(P, D, Q, s)`. With `D > 0` the mean is no longer estimated
+    /// by default.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `period` is 0 while `P`, `D` or `Q` is not.
+    #[must_use]
+    pub fn seasonal(self, p: usize, d: usize, q: usize, period: usize) -> Self {
+        assert!(
+            period > 0 || p + d + q == 0,
+            "a seasonal part needs a period of at least 1"
+        );
+        Self {
+            seasonal_p: p,
+            seasonal_d: d,
+            seasonal_q: q,
+            period,
+            mean: self.mean && d == 0,
+            ..self
+        }
+    }
+
+    /// Whether to estimate the mean of the differenced series: the mean for `d = D = 0`,
+    /// the drift for `d = 1, D = 0`.
     #[must_use]
     pub fn mean(self, include: bool) -> Self {
         Self {
@@ -84,37 +136,46 @@ impl Arima {
     /// # Errors
     ///
     /// [`FitError::TooShort`] if the differenced series has fewer than
-    /// `p + q + 2` non-missing values (one more with a mean).
+    /// `p + q + P + Q + 2` non-missing values (one more with a mean).
     pub fn fit(&self, y: &[f64]) -> Result<Fitted, FitError> {
-        let w = difference(y, self.d);
+        let w = differenced(y, &self.shape(&[], &[], &[], &[]));
         let present = w.iter().filter(|v| !v.is_nan()).count();
-        let needed = self.p + self.q + usize::from(self.mean) + 2;
+        let needed = self.coefficients() + usize::from(self.mean) + 2;
         if present < needed {
             return Err(FitError::TooShort { needed, present });
         }
 
         let start = self.start(&w);
-        let objective = |u: &[f64]| {
-            let (ar, ma, mean) = self.constrain(u);
-            let centered: Vec<f64> = w.iter().map(|v| v - mean).collect();
-            match concentrated(&centered, &ar, &ma) {
-                Some((llf, _, n)) => -llf / n as f64,
-                None => f64::INFINITY,
-            }
+        let evaluate = |parameters: &Parameters| {
+            let centered: Vec<f64> = w.iter().map(|v| v - parameters.mean).collect();
+            let shape = self.shape(
+                &parameters.ar,
+                &parameters.ma,
+                &parameters.seasonal_ar,
+                &parameters.seasonal_ma,
+            );
+            concentrated(&centered, &shape)
+        };
+        let objective = |u: &[f64]| match evaluate(&self.constrain(u)) {
+            Some((llf, _, n)) => -llf / n as f64,
+            None => f64::INFINITY,
         };
         let minimum = bfgs::minimize(objective, start, bfgs::Options::default());
 
-        let (ar, ma, mean) = self.constrain(&minimum.x);
-        let centered: Vec<f64> = w.iter().map(|v| v - mean).collect();
+        let parameters = self.constrain(&minimum.x);
         let (loglike, sigma2, nobs) =
-            concentrated(&centered, &ar, &ma).expect("the optimum was evaluated finite");
+            evaluate(&parameters).expect("the optimum was evaluated finite");
 
         Ok(Fitted {
-            ar,
+            ar: parameters.ar,
             d: self.d,
-            ma,
+            ma: parameters.ma,
+            seasonal_ar: parameters.seasonal_ar,
+            seasonal_d: self.seasonal_d,
+            seasonal_ma: parameters.seasonal_ma,
+            period: self.period,
             with_mean: self.mean,
-            mean,
+            mean: parameters.mean,
             sigma2,
             loglike,
             nobs,
@@ -123,11 +184,38 @@ impl Arima {
         })
     }
 
-    /// Unconstrained starting values `[ar..., ma..., mean]`.
+    /// The number of AR and MA coefficients, seasonal ones included.
+    fn coefficients(&self) -> usize {
+        self.p + self.q + self.seasonal_p + self.seasonal_q
+    }
+
+    /// A spec with this model's orders and the given coefficients, zero mean and unit variance.
+    fn shape<'a>(
+        &self,
+        ar: &'a [f64],
+        ma: &'a [f64],
+        seasonal_ar: &'a [f64],
+        seasonal_ma: &'a [f64],
+    ) -> ArimaSpec<'a> {
+        ArimaSpec {
+            ar,
+            d: self.d,
+            ma,
+            seasonal: Seasonal {
+                ar: seasonal_ar,
+                d: self.seasonal_d,
+                ma: seasonal_ma,
+                period: self.period,
+            },
+            ..ArimaSpec::default()
+        }
+    }
+
+    /// Unconstrained starting values `[ar..., ma..., seasonal ar..., seasonal ma..., mean]`.
     ///
-    /// Hannan–Rissanen supplies the AR and MA parts and the sample mean the mean. A part
-    /// that comes out non-stationary (or non-invertible), or a failed regression, starts
-    /// at zero instead, as statsmodels does.
+    /// Hannan–Rissanen supplies the non-seasonal AR and MA parts and the sample mean the
+    /// mean; the seasonal parts start at zero. A part that comes out non-stationary (or
+    /// non-invertible), or a failed regression, starts at zero instead, as statsmodels does.
     fn start(&self, w: &[f64]) -> Vec<f64> {
         let present: Vec<f64> = w.iter().copied().filter(|v| !v.is_nan()).collect();
         let sample_mean = present.iter().sum::<f64>() / present.len() as f64;
@@ -139,13 +227,14 @@ impl Arima {
         let negated: Vec<f64> = ar.iter().map(|phi| -phi).collect();
         let ar_start = transform::unconstrain(&negated)
             .filter(|_| ar.len() == self.p)
-            .unwrap_or_else(|| alloc::vec![0.0; self.p]);
+            .unwrap_or_else(|| vec![0.0; self.p]);
         let ma_start = transform::unconstrain(&ma)
             .filter(|_| ma.len() == self.q)
-            .unwrap_or_else(|| alloc::vec![0.0; self.q]);
+            .unwrap_or_else(|| vec![0.0; self.q]);
 
         let mut start = ar_start;
         start.extend(ma_start);
+        start.extend(core::iter::repeat_n(0.0, self.seasonal_p + self.seasonal_q));
         if self.mean {
             start.push(mean);
         }
@@ -153,20 +242,28 @@ impl Arima {
         start
     }
 
-    /// Maps unconstrained parameters to `(ar, ma, mean)`.
-    fn constrain(&self, u: &[f64]) -> (Vec<f64>, Vec<f64>, f64) {
-        let ar = transform::constrain(&u[..self.p])
-            .iter()
-            .map(|y| -y)
-            .collect();
-        let ma = transform::constrain(&u[self.p..self.p + self.q]);
-        let mean = if self.mean { u[self.p + self.q] } else { 0.0 };
+    /// Maps unconstrained parameters to constrained ones.
+    ///
+    /// AR parts are negated after the transform and MA parts are not, as in statsmodels
+    /// SARIMAX, so that both come out stationary or invertible.
+    fn constrain(&self, u: &[f64]) -> Parameters {
+        let (ar, rest) = u.split_at(self.p);
+        let (ma, rest) = rest.split_at(self.q);
+        let (seasonal_ar, rest) = rest.split_at(self.seasonal_p);
+        let (seasonal_ma, rest) = rest.split_at(self.seasonal_q);
+        let negated = |x: &[f64]| transform::constrain(x).iter().map(|y| -y).collect();
 
-        (ar, ma, mean)
+        Parameters {
+            ar: negated(ar),
+            ma: transform::constrain(ma),
+            seasonal_ar: negated(seasonal_ar),
+            seasonal_ma: transform::constrain(seasonal_ma),
+            mean: if self.mean { rest[0] } else { 0.0 },
+        }
     }
 }
 
-/// A fitted ARIMA model.
+/// A fitted seasonal ARIMA model.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Fitted {
     /// The AR coefficients `phi_1, ..., phi_p`. Always stationary.
@@ -175,6 +272,14 @@ pub struct Fitted {
     pub d: usize,
     /// The MA coefficients `theta_1, ..., theta_q`. Always invertible.
     pub ma: Vec<f64>,
+    /// The seasonal AR coefficients `Phi_1, ..., Phi_P`. Always stationary.
+    pub seasonal_ar: Vec<f64>,
+    /// The seasonal differencing order.
+    pub seasonal_d: usize,
+    /// The seasonal MA coefficients `Theta_1, ..., Theta_Q`. Always invertible.
+    pub seasonal_ma: Vec<f64>,
+    /// The season length; 0 without a seasonal part.
+    pub period: usize,
     /// Whether the mean of the differenced series was estimated.
     pub with_mean: bool,
     /// The mean of the differenced series; `0.0` if it was not estimated.
@@ -192,11 +297,16 @@ pub struct Fitted {
 }
 
 impl Fitted {
-    /// The number of estimated parameters: `p + q`, one for the mean if estimated, and
-    /// one for `sigma2`. This is the `k` of the information criteria.
+    /// The number of estimated parameters: `p + q + P + Q`, one for the mean if estimated,
+    /// and one for `sigma2`. This is the `k` of the information criteria.
     #[must_use]
     pub fn parameters(&self) -> usize {
-        self.ar.len() + self.ma.len() + usize::from(self.with_mean) + 1
+        self.ar.len()
+            + self.ma.len()
+            + self.seasonal_ar.len()
+            + self.seasonal_ma.len()
+            + usize::from(self.with_mean)
+            + 1
     }
 
     /// Akaike's information criterion, `-2 loglike + 2k`.
@@ -235,6 +345,12 @@ impl Fitted {
             ar: &self.ar,
             d: self.d,
             ma: &self.ma,
+            seasonal: Seasonal {
+                ar: &self.seasonal_ar,
+                d: self.seasonal_d,
+                ma: &self.seasonal_ma,
+                period: self.period,
+            },
             mean: self.mean,
             sigma2: self.sigma2,
         }
@@ -246,7 +362,7 @@ impl Fitted {
 pub enum FitError {
     /// The differenced series has too few non-missing values for the model.
     TooShort {
-        /// The values the model needs: `p + q + 2`, plus one with a mean.
+        /// The values the model needs: `p + q + P + Q + 2`, plus one with a mean.
         needed: usize,
         /// The non-missing values after differencing.
         present: usize,
@@ -306,6 +422,10 @@ mod tests {
             ar: alloc::vec![0.5],
             d: 0,
             ma: alloc::vec![0.2, 0.1],
+            seasonal_ar: alloc::vec![],
+            seasonal_d: 0,
+            seasonal_ma: alloc::vec![],
+            period: 0,
             with_mean: true,
             mean: 1.0,
             sigma2: 1.0,
