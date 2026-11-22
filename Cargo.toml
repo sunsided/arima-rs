@@ -39,6 +39,11 @@ name = "no_alloc"
 path = "tests/no_alloc.rs"
 harness = false
 
+# Fits a model, which needs `alloc`.
+[[example]]
+name = "holidays_outages"
+required-features = ["alloc"]
+
 [[bench]]
 name = "arima"
 harness = false
