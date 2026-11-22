@@ -156,8 +156,8 @@ pub fn kpss(x: &[f64], null: KpssNull, lags: usize) -> Option<TestResult> {
 
     let statistic = eta / variance;
     let critical = match null {
-        KpssNull::Level => [0.347, 0.463, 0.574, 0.739],
-        KpssNull::Trend => [0.119, 0.146, 0.176, 0.216],
+        KpssNull::Level => LEVEL_CRITICAL,
+        KpssNull::Trend => TREND_CRITICAL,
     };
 
     Some(TestResult {
@@ -180,7 +180,13 @@ pub fn kpss_lags(n: usize) -> usize {
 ///
 /// Differences while [`kpss`] (level, [`kpss_lags`]) rejects stationarity at `alpha`,
 /// the approach of R's `forecast::ndiffs`. Use it to pick `d` before fitting.
-/// `alpha` is effectively limited to `[0.01, 0.10]` by the KPSS table.
+///
+/// The KPSS table only covers `[0.01, 0.10]`, so `alpha` is clamped to that range, as R
+/// does, and a test rejects when its statistic exceeds the critical value at `alpha`
+/// (interpolated in the same table). Comparing clipped p-values instead would make the
+/// ends of the range misbehave.
+/// Non-finite values are dropped first; a series too short to test counts as
+/// needing no more differences.
 ///
 /// # Examples
 ///
@@ -199,10 +205,12 @@ pub fn kpss_lags(n: usize) -> usize {
 #[cfg(feature = "alloc")]
 #[must_use]
 pub fn ndiffs(x: &[f64], alpha: f64, max_d: usize) -> usize {
-    let mut series = alloc::vec::Vec::from(x);
+    let alpha = alpha.clamp(0.01, 0.10);
+    let mut series: alloc::vec::Vec<f64> = x.iter().copied().filter(|v| v.is_finite()).collect();
+    let critical = critical_value(alpha, LEVEL_CRITICAL);
     for d in 0..max_d {
         match kpss(&series, KpssNull::Level, kpss_lags(series.len())) {
-            Some(test) if test.p_value < alpha => {
+            Some(test) if test.statistic > critical => {
                 series = crate::difference(&series, 1);
             }
             _ => return d,
@@ -233,10 +241,32 @@ fn kpss_residuals(x: &[f64], null: KpssNull) -> impl Fn(usize) -> f64 + '_ {
     move |t| x[t] - level - slope * ((t + 1) as f64 - t_mean)
 }
 
+/// The significance levels of the KPSS critical-value tables.
+const P: [f64; 4] = [0.10, 0.05, 0.025, 0.01];
+
+/// KPSS critical values for level stationarity at [`P`] (Kwiatkowski et al. 1992, table 1).
+const LEVEL_CRITICAL: [f64; 4] = [0.347, 0.463, 0.574, 0.739];
+
+/// KPSS critical values for trend stationarity at [`P`].
+const TREND_CRITICAL: [f64; 4] = [0.119, 0.146, 0.176, 0.216];
+
+/// The critical value at `alpha`, linear in the table between its levels; `alpha` must
+/// lie in `[0.01, 0.10]`.
+#[cfg(feature = "alloc")]
+fn critical_value(alpha: f64, critical: [f64; 4]) -> f64 {
+    for i in 1..4 {
+        if alpha >= P[i] {
+            let fraction = (P[i - 1] - alpha) / (P[i - 1] - P[i]);
+            return critical[i - 1] + fraction * (critical[i] - critical[i - 1]);
+        }
+    }
+
+    critical[3]
+}
+
 /// `np.interp(statistic, critical, [0.10, 0.05, 0.025, 0.01])`: linear in the table,
 /// clipped at its ends.
 fn interpolate_p_value(statistic: f64, critical: [f64; 4]) -> f64 {
-    const P: [f64; 4] = [0.10, 0.05, 0.025, 0.01];
     if statistic <= critical[0] {
         return P[0];
     }
@@ -287,6 +317,16 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "alloc")]
+    fn critical_values_invert_the_table() {
+        assert!((critical_value(0.10, LEVEL_CRITICAL) - 0.347).abs() < 1e-15);
+        assert!((critical_value(0.05, LEVEL_CRITICAL) - 0.463).abs() < 1e-15);
+        assert!((critical_value(0.01, LEVEL_CRITICAL) - 0.739).abs() < 1e-15);
+        let midway = critical_value(0.075, LEVEL_CRITICAL);
+        assert!((interpolate_p_value(midway, LEVEL_CRITICAL) - 0.075).abs() < 1e-12);
+    }
+
+    #[test]
     fn kpss_lags_follow_statsmodels() {
         // int(ceil(12 * (n / 100) ** 0.25)), capped at n - 1.
         assert_eq!(kpss_lags(100), 12);
@@ -330,5 +370,20 @@ mod tests {
         let twice = cumulative(&cumulative(&y));
         assert_eq!(ndiffs(&twice, 0.05, 2), 2);
         assert_eq!(ndiffs(&twice, 0.05, 3), 3);
+    }
+
+    #[test]
+    #[cfg(feature = "alloc")]
+    fn ndiffs_edges() {
+        let y = walk(200);
+        // alpha at the bottom of the table still rejects a clear random walk.
+        assert_eq!(ndiffs(&y, 0.01, 2), 1);
+        // alpha above the table is clamped, so white noise is not differenced.
+        assert_eq!(ndiffs(&crate::difference(&y, 1), 0.5, 2), 0);
+
+        let mut gappy = y.clone();
+        gappy[50] = f64::NAN;
+        assert_eq!(ndiffs(&gappy, 0.05, 2), 1);
+        assert_eq!(ndiffs(&[1.0, 2.0], 0.05, 2), 0);
     }
 }
