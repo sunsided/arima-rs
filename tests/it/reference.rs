@@ -1,7 +1,7 @@
 //! Checks every statistic against the statsmodels vectors in [`crate::reference_data`].
 
 use crate::reference_data::{Case, ALL};
-use backshift::{acorr, acov, pacf, Estimator, TimeSeries};
+use backshift::{acorr, acov, burg, pacf, yule_walker, ArCoefficients, Estimator, TimeSeries};
 
 /// Absolute tolerance for comparisons with statsmodels.
 ///
@@ -76,5 +76,57 @@ fn var_matches_numpy() {
             series(case, Estimator::Unbiased).var(),
             case.var_unbiased,
         );
+    }
+}
+
+/// Asserts that a fit matches statsmodels' coefficients and innovation variance.
+///
+/// A `NaN` expected variance means statsmodels found `sigma2 <= 0`, so the fit must too.
+fn assert_fit(what: &str, fit: &ArCoefficients, phi: &[f64], sigma2: f64) {
+    assert_eq!(fit.phi.len(), phi.len(), "{what} order");
+    for (lag, (&actual, &expected)) in fit.phi.iter().zip(phi).enumerate() {
+        assert_close(what, lag + 1, actual, expected);
+    }
+
+    if sigma2.is_nan() {
+        assert!(
+            fit.sigma2 <= 0.0,
+            "{what} sigma2: got {}, statsmodels <= 0",
+            fit.sigma2
+        );
+    } else {
+        // Relative, because the variances span 1e-6 to 10. 1e-8 rather than TOLERANCE: on the
+        // near-deterministic sine series Burg's partial autocorrelations are close to +-1, and
+        // its `(1 - phi^2) d - v^2 - u^2` update cancels about three digits.
+        let error = (fit.sigma2 - sigma2).abs() / sigma2.abs();
+        assert!(
+            error <= 1e-8,
+            "{what} sigma2: got {}, statsmodels {sigma2}",
+            fit.sigma2
+        );
+    }
+}
+
+#[test]
+fn yule_walker_matches_statsmodels() {
+    for case in ALL {
+        let mle = yule_walker(series(case, Estimator::Biased), case.ar_order).unwrap();
+        assert_fit("yule_walker mle", &mle, case.yw_mle_phi, case.yw_mle_sigma2);
+
+        let adjusted = yule_walker(series(case, Estimator::Unbiased), case.ar_order).unwrap();
+        assert_fit(
+            "yule_walker adjusted",
+            &adjusted,
+            case.yw_adjusted_phi,
+            case.yw_adjusted_sigma2,
+        );
+    }
+}
+
+#[test]
+fn burg_matches_statsmodels() {
+    for case in ALL {
+        let fit = burg(series(case, Estimator::Biased), case.ar_order).unwrap();
+        assert_fit("burg", &fit, case.burg_phi, case.burg_sigma2);
     }
 }

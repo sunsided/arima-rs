@@ -11,10 +11,12 @@ import pathlib
 
 import numpy as np
 import statsmodels
+from statsmodels.regression.linear_model import burg, yule_walker
 from statsmodels.tsa.stattools import acf, acovf, pacf
 
 OUTPUT = pathlib.Path(__file__).resolve().parent.parent / "tests" / "it" / "reference_data.rs"
 MAX_LAGS = 10
+AR_ORDER = 3
 
 
 def returns_series():
@@ -53,9 +55,15 @@ SERIES = [
 ]
 
 
+def rust_float(value):
+    """Format a float as a Rust literal that round-trips exactly."""
+    value = float(value)
+    return "f64::NAN" if np.isnan(value) else repr(value)
+
+
 def rust_array(values):
     """Format floats as a Rust array literal that round-trips exactly."""
-    body = ",\n".join(f"        {float(v)!r}" for v in values)
+    body = ",\n".join(f"        {rust_float(v)}" for v in values)
     return f"&[\n{body},\n    ]"
 
 
@@ -70,14 +78,31 @@ def case(name, doc, y):
         "acovf_biased": acovf(y, adjusted=False, fft=False)[: lags + 1],
         "acovf_unbiased": acovf(y, adjusted=True, fft=False)[: lags + 1],
     }
+    order = min(AR_ORDER, lags)
+    yw_mle, sigma_mle = yule_walker(y, order, method="mle")
+    yw_adjusted, sigma_adjusted = yule_walker(y, order, method="adjusted")
+    burg_phi, burg_sigma2 = burg(y, order)
+    fields |= {
+        "yw_mle_phi": yw_mle,
+        "yw_adjusted_phi": yw_adjusted,
+        "burg_phi": burg_phi,
+    }
+    scalars = {
+        "ar_order": str(order),
+        # yule_walker returns sigma, not sigma2, and NaN when sigma2 <= 0.
+        "yw_mle_sigma2": rust_float(sigma_mle**2),
+        "yw_adjusted_sigma2": rust_float(sigma_adjusted**2),
+        "burg_sigma2": rust_float(burg_sigma2),
+    }
     lines = [f"/// {doc}", f"pub const {name}: Case = Case {{", f"    max_lags: {lags},"]
     for field, values in fields.items():
         lines.append(f"    {field}: {rust_array(values)},")
     lines += [
         f"    var_biased: {float(np.var(y, ddof=0))!r},",
         f"    var_unbiased: {float(np.var(y, ddof=1))!r},",
-        "};",
     ]
+    lines += [f"    {field}: {value}," for field, value in scalars.items()]
+    lines += ["};"]
     return "\n".join(lines)
 
 
@@ -106,6 +131,21 @@ pub struct Case {{
     pub var_biased: f64,
     /// Variance divided by `n - 1`: `np.var(values, ddof=1)`.
     pub var_unbiased: f64,
+    /// The AR order of the fits below, `min(3, max_lags)`.
+    pub ar_order: usize,
+    /// `yule_walker(values, ar_order, method="mle")` coefficients.
+    pub yw_mle_phi: &'static [f64],
+    /// The square of the sigma that `yule_walker(..., method="mle")` returns.
+    pub yw_mle_sigma2: f64,
+    /// `yule_walker(values, ar_order, method="adjusted")` coefficients.
+    pub yw_adjusted_phi: &'static [f64],
+    /// The square of the sigma that `yule_walker(..., method="adjusted")` returns;
+    /// `NaN` where statsmodels found `sigma2 <= 0`.
+    pub yw_adjusted_sigma2: f64,
+    /// `burg(values, ar_order)` coefficients.
+    pub burg_phi: &'static [f64],
+    /// `burg(values, ar_order)` innovation variance.
+    pub burg_sigma2: f64,
 }}
 
 /// All reference cases.

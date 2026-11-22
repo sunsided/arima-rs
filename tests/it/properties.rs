@@ -1,6 +1,8 @@
 //! Property tests: invariants that must hold for any non-constant series.
 
-use backshift::{acorr, acov, corr, cov, difference, integrate, pacf, Estimator, TimeSeries};
+use backshift::{
+    acorr, acov, corr, cov, difference, integrate, pacf, yule_walker, Estimator, TimeSeries,
+};
 use proptest::prelude::*;
 
 /// Absolute slack for floating-point round-off in the invariants below.
@@ -180,5 +182,19 @@ proptest! {
         for (actual, expected) in restored.iter().zip(&values[split..]) {
             prop_assert!((actual - expected).abs() <= 1e-9 * scale * len_f64(values.len()), "{actual} vs {expected}");
         }
+    }
+
+    /// The last Yule–Walker coefficient of an AR(p) fit is the partial autocorrelation at lag `p`,
+    /// and with the biased estimator the innovation variance is positive.
+    #[test]
+    fn yule_walker_agrees_with_pacf(values in series(), p in 1usize..10) {
+        prop_assume!(p < values.len());
+        let x = ts(&values, Estimator::Biased);
+        let fit = yule_walker(&x, p).unwrap();
+        let partial = pacf(&x, p).unwrap();
+
+        prop_assert_eq!(fit.phi.len(), p);
+        prop_assert!((fit.phi[p - 1] - partial[p]).abs() <= 1e-6, "{} vs {}", fit.phi[p - 1], partial[p]);
+        prop_assert!(fit.sigma2 > 0.0, "sigma2 = {}", fit.sigma2);
     }
 }

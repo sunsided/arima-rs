@@ -14,11 +14,13 @@ extern crate alloc;
 #[cfg(any(feature = "std", test))]
 extern crate std;
 
+pub use crate::autoregressive::{burg, yule_walker, ArCoefficients};
 pub use crate::difference::{difference, integrate};
 pub use crate::time_series::{TimeSeries, TimeSeriesError};
 use alloc::vec::Vec;
 use core::borrow::Borrow;
 
+mod autoregressive;
 mod difference;
 mod math;
 mod time_series;
@@ -162,37 +164,10 @@ pub fn pacf<'x, X: Borrow<TimeSeries<'x>>>(values: X, max_lags: usize) -> Option
         return None;
     }
 
-    let acf = (1..=max_lags)
+    let acf = (0..=max_lags)
         .map(|lag| acorr(values, lag))
         .collect::<Option<Vec<_>>>()?;
-    Some(durbin_levinson(&acf))
-}
-
-/// Runs the Durbin-Levinson recursion.
-///
-/// `acf[k - 1]` holds the autocorrelation at lag `k`. Returns `[1.0, phi_11, phi_22, ...]`.
-fn durbin_levinson(acf: &[f64]) -> Vec<f64> {
-    let mut result = Vec::with_capacity(acf.len() + 1);
-    result.push(1.0);
-
-    // phi_{k-1, j} for j = 1..k-1, stored at index j - 1.
-    let mut prev: Vec<f64> = Vec::with_capacity(acf.len());
-    let mut curr: Vec<f64> = Vec::with_capacity(acf.len());
-
-    for k in 1..=acf.len() {
-        let num = acf[k - 1] - (1..k).map(|j| prev[j - 1] * acf[k - j - 1]).sum::<f64>();
-        let den = 1.0 - (1..k).map(|j| prev[j - 1] * acf[j - 1]).sum::<f64>();
-        let phi_kk = num / den;
-
-        curr.clear();
-        curr.extend((1..k).map(|j| prev[j - 1] - phi_kk * prev[k - j - 1]));
-        curr.push(phi_kk);
-        core::mem::swap(&mut prev, &mut curr);
-
-        result.push(phi_kk);
-    }
-
-    result
+    Some(autoregressive::durbin_levinson(&acf).pacf)
 }
 
 #[cfg(test)]
@@ -345,17 +320,6 @@ mod tests {
         let result = pacf(&values, usize::MAX).unwrap();
         assert_eq!(result.len(), 5);
         assert!(result.iter().all(|r| r.is_finite()));
-    }
-
-    #[test]
-    fn test_durbin_levinson_ar1() {
-        // An AR(1) process with phi = 0.5 has acf 0.5^k and pacf [1, 0.5, 0, 0, ...].
-        let acf: Vec<f64> = (1..=5).map(|k| 0.5_f64.powi(k)).collect();
-        let result = durbin_levinson(&acf);
-        let expected = [1.0, 0.5, 0.0, 0.0, 0.0, 0.0];
-        for (r, e) in result.iter().zip(expected) {
-            assert_approx_eq!(f64, *r, e, epsilon = 1e-12);
-        }
     }
 
     fn signal_gen(len: usize) -> Vec<f64> {
