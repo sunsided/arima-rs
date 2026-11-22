@@ -83,6 +83,11 @@ mod normal;
 mod state_space;
 mod time_series;
 
+/// Compiles the README's code examples as doctests, so they cannot drift.
+#[cfg(all(doctest, feature = "alloc"))]
+#[doc = include_str!("../README.md")]
+pub struct ReadmeDoctests;
+
 /// Defines the estimator to use.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Estimator {

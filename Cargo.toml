@@ -1,10 +1,17 @@
 [package]
 name = "backshift"
 version = "0.1.0"
+description = "ARIMA models fitted by exact maximum likelihood, with a streaming filter that runs without a heap"
+authors = ["Markus Mayer"]
+repository = "https://github.com/sunsided/arima-rs"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+keywords = ["arima", "time-series", "forecasting", "kalman-filter", "no-std"]
+categories = ["mathematics", "science", "no-std", "no-std::no-alloc", "embedded"]
 edition = "2024"
 # `f64::abs` is in `core` (needed without `std`) since 1.85.
 rust-version = "1.85"
-exclude = ["/ci"]
+exclude = ["/ci", "/docs", "/.github"]
 
 [features]
 default = ["std"]
