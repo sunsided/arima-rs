@@ -36,7 +36,7 @@ filter.forecast_interval_into(0.95, &mut mean, &mut lower, &mut upper);
 
 ## Who is this for
 
-The crate is for running ARIMA where a Python process won't fit: on a microcontroller watching a sensor, in WebAssembly,
+The crate is for running ARIMA where statsmodels won't go: on a microcontroller watching a sensor, in WebAssembly,
 or in a Rust service that would rather not link BLAS. The streaming filter is the part that sets it apart. Each new value
 costs one Kalman step in `O(r²)` for `r = max(p, q + 1)` states, the innovation it returns doubles as an anomaly score
 (its variance comes with it), and the whole state lives inline in a `Copy` struct.
