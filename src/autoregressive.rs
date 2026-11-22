@@ -7,6 +7,7 @@
 
 #[cfg(doc)]
 use crate::Estimator;
+use crate::math::dot;
 use crate::{TimeSeries, acov};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -193,11 +194,6 @@ fn burg_pacf(x: &[f64], p: usize) -> (Vec<f64>, f64) {
     pacf[0] = 1.0;
 
     (pacf, sigma2)
-}
-
-/// The dot product of two equally long slices.
-fn dot(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(a, b)| a * b).sum()
 }
 
 #[cfg(test)]

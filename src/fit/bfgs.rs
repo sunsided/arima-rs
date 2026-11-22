@@ -4,6 +4,7 @@
 //! backtracking Armijo line search. The objective may return `+inf` (or `NaN`)
 //! for points it cannot evaluate; the line search then steps back.
 
+use crate::math::dot;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -236,11 +237,6 @@ fn identity(n: usize) -> Vec<Vec<f64>> {
             row
         })
         .collect()
-}
-
-/// The dot product of two equally long slices.
-fn dot(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(a, b)| a * b).sum()
 }
 
 /// The largest absolute entry.
