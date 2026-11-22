@@ -15,9 +15,13 @@
 //!     U2 -->|constrain| F["Fitted"]
 //! ```
 
+mod auto;
 mod bfgs;
 mod hannan_rissanen;
+mod roots;
 mod transform;
+
+pub use auto::{AutoArima, AutoFit, Criterion, nsdiffs};
 
 pub use hannan_rissanen::{ArmaCoefficients, hannan_rissanen};
 

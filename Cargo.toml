@@ -19,11 +19,14 @@ default = ["std"]
 std = ["alloc"]
 # Enable the functions that return a `Vec`. Without it the crate needs no global allocator.
 alloc = []
+# Fit the candidates of an exhaustive `AutoArima` search in parallel.
+rayon = ["std", "dep:rayon"]
 # Use the pure-Rust `libm` crate on `no_std` targets.
 libm = ["dep:libm"]
 
 [dependencies]
 libm = { version = "0.2.16", optional = true }
+rayon = { version = "1.10", optional = true }
 
 [[test]]
 name = "it"
