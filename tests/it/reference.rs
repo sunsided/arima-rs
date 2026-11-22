@@ -1,7 +1,7 @@
 //! Checks every statistic against the statsmodels vectors in [`crate::reference_data`].
 
-use crate::reference_data::{Case, ALL};
-use backshift::{acorr, acov, burg, pacf, yule_walker, ArCoefficients, Estimator, TimeSeries};
+use crate::reference_data::{ALL, Case};
+use backshift::{ArCoefficients, Estimator, TimeSeries, acorr, acov, burg, pacf, yule_walker};
 
 /// Absolute tolerance for comparisons with statsmodels.
 ///

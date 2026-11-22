@@ -7,7 +7,7 @@
 
 #[cfg(doc)]
 use crate::Estimator;
-use crate::{acov, TimeSeries};
+use crate::{TimeSeries, acov};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::borrow::Borrow;

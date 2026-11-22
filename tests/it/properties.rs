@@ -1,7 +1,7 @@
 //! Property tests: invariants that must hold for any non-constant series.
 
 use backshift::{
-    acorr, acov, corr, cov, difference, integrate, pacf, yule_walker, Estimator, TimeSeries,
+    Estimator, TimeSeries, acorr, acov, corr, cov, difference, integrate, pacf, yule_walker,
 };
 use proptest::prelude::*;
 

@@ -1,9 +1,9 @@
 [package]
 name = "backshift"
 version = "0.1.0"
-edition = "2021"
-# `core::error::Error` is stable since 1.81.
-rust-version = "1.81"
+edition = "2024"
+# `f64::abs` is in `core` (needed without `std`) since 1.85.
+rust-version = "1.85"
 exclude = ["/ci"]
 
 [features]
@@ -22,6 +22,12 @@ libm = { version = "0.2.16", optional = true }
 name = "it"
 path = "tests/it/main.rs"
 required-features = ["alloc"]
+
+# Counts allocations on the device path; needs its own binary without the test harness.
+[[test]]
+name = "no_alloc"
+path = "tests/no_alloc.rs"
+harness = false
 
 [dev-dependencies]
 float-cmp = "0.9.0"

@@ -16,3 +16,18 @@ pub(crate) fn sqrt(x: f64) -> f64 {
 pub(crate) fn sqrt(x: f64) -> f64 {
     libm::sqrt(x)
 }
+
+/// Natural logarithm of `x`; `NaN` for negative input, `-inf` for zero.
+#[cfg(feature = "std")]
+#[inline]
+pub(crate) fn ln(x: f64) -> f64 {
+    x.ln()
+}
+
+/// Natural logarithm of `x`; `NaN` for negative input, `-inf` for zero.
+// Only the log-likelihood needs `ln`, and it requires `alloc`.
+#[cfg(all(not(feature = "std"), feature = "libm", feature = "alloc"))]
+#[inline]
+pub(crate) fn ln(x: f64) -> f64 {
+    libm::log(x)
+}

@@ -24,9 +24,13 @@ extern crate alloc;
 extern crate std;
 
 #[cfg(feature = "alloc")]
-pub use crate::autoregressive::{burg, yule_walker, ArCoefficients};
+pub use crate::autoregressive::{ArCoefficients, burg, yule_walker};
 #[cfg(feature = "alloc")]
 pub use crate::difference::{difference, integrate};
+pub use crate::filter::{ArmaSpec, Filter, FilterError};
+#[cfg(feature = "alloc")]
+pub use crate::likelihood::{innovations, loglike};
+pub use crate::state_space::Innovation;
 pub use crate::time_series::{TimeSeries, TimeSeriesError};
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
@@ -36,7 +40,11 @@ use core::borrow::Borrow;
 mod autoregressive;
 #[cfg(feature = "alloc")]
 mod difference;
+mod filter;
+#[cfg(feature = "alloc")]
+mod likelihood;
 mod math;
+mod state_space;
 mod time_series;
 
 /// Defines the estimator to use.
