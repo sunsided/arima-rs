@@ -1,7 +1,10 @@
 //! Checks every statistic against the statsmodels vectors in [`crate::reference_data`].
 
 use crate::reference_data::{ALL, Case};
-use backshift::{ArCoefficients, Estimator, TimeSeries, acorr, acov, burg, pacf, yule_walker};
+use backshift::{
+    ArCoefficients, Estimator, KpssNull, TestResult, TimeSeries, acorr, acov, burg, jarque_bera,
+    kpss, kpss_lags, ljung_box, pacf, yule_walker,
+};
 
 /// Absolute tolerance for comparisons with statsmodels.
 ///
@@ -128,5 +131,62 @@ fn burg_matches_statsmodels() {
     for case in ALL {
         let fit = burg(series(case, Estimator::Biased), case.ar_order).unwrap();
         assert_fit("burg", &fit, case.burg_phi, case.burg_sigma2);
+    }
+}
+
+/// Asserts a statistic within [`TOLERANCE`] relative, and a p-value within 1e-9 relative
+/// (or below 1e-300 where statsmodels underflows to zero).
+fn assert_test(what: &str, actual: TestResult, statistic: f64, p_value: f64) {
+    let statistic_error = (actual.statistic - statistic).abs() / statistic.abs().max(1.0);
+    assert!(
+        statistic_error <= TOLERANCE,
+        "{what} statistic: got {}, statsmodels {statistic}",
+        actual.statistic
+    );
+
+    if p_value == 0.0 {
+        assert!(
+            actual.p_value < 1e-300,
+            "{what} p-value: got {}, statsmodels 0",
+            actual.p_value
+        );
+    } else {
+        let p_error = (actual.p_value - p_value).abs() / p_value;
+        assert!(
+            p_error <= 1e-9,
+            "{what} p-value: got {}, statsmodels {p_value}",
+            actual.p_value
+        );
+    }
+}
+
+#[test]
+fn diagnostics_match_statsmodels() {
+    for case in ALL {
+        let lags = kpss_lags(case.values.len());
+        assert_test(
+            "ljung_box",
+            ljung_box(case.values, case.max_lags, 0).unwrap(),
+            case.ljung_box_statistic,
+            case.ljung_box_p_value,
+        );
+        assert_test(
+            "jarque_bera",
+            jarque_bera(case.values).unwrap(),
+            case.jarque_bera_statistic,
+            case.jarque_bera_p_value,
+        );
+        assert_test(
+            "kpss level",
+            kpss(case.values, KpssNull::Level, lags).unwrap(),
+            case.kpss_level_statistic,
+            case.kpss_level_p_value,
+        );
+        assert_test(
+            "kpss trend",
+            kpss(case.values, KpssNull::Trend, lags).unwrap(),
+            case.kpss_trend_statistic,
+            case.kpss_trend_p_value,
+        );
     }
 }

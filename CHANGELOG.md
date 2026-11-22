@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   `forecast_exog_into` and `forecast_interval_exog_into`, `innovations_exog` and `loglike_exog`. Fitted models
   report `exog`; `FilterError::Regressors` and `FitError::RegressorShape` are new.
 - `ArimaSpec::capacity()`: the smallest `R` a `Filter` needs, regressors included.
+- Diagnostics: `ljung_box`, `jarque_bera`, `kpss` (with `KpssNull` and `kpss_lags`) returning `TestResult`, all
+  heap-free, and `ndiffs` to choose the differencing order.
 
 ### Changed
 

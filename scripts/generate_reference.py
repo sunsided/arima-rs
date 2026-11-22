@@ -8,6 +8,7 @@ Requires numpy and statsmodels (tested with statsmodels 0.14).
 """
 
 import pathlib
+import warnings
 
 import numpy as np
 import statsmodels
@@ -15,7 +16,9 @@ from statsmodels.regression.linear_model import burg, yule_walker
 from statsmodels.tsa.arima.estimators.hannan_rissanen import hannan_rissanen
 from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.tsa.statespace.sarimax import SARIMAX
-from statsmodels.tsa.stattools import acf, acovf, pacf
+from statsmodels.stats.diagnostic import acorr_ljungbox
+from statsmodels.stats.stattools import jarque_bera
+from statsmodels.tsa.stattools import acf, acovf, kpss, pacf
 
 TESTS = pathlib.Path(__file__).resolve().parent.parent / "tests" / "it"
 OUTPUT = TESTS / "reference_data.rs"
@@ -94,7 +97,22 @@ def case(name, doc, y):
         "yw_adjusted_phi": yw_adjusted,
         "burg_phi": burg_phi,
     }
+    ljung = acorr_ljungbox(y, lags=[lags], model_df=0)
+    jb_stat, jb_p, _, _ = jarque_bera(y)
+    kpss_lags = min(int(np.ceil(12.0 * (len(y) / 100.0) ** 0.25)), len(y) - 1)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # the table's p-value clipping warns
+        level_stat, level_p, _, _ = kpss(y, regression="c", nlags=kpss_lags)
+        trend_stat, trend_p, _, _ = kpss(y, regression="ct", nlags=kpss_lags)
     scalars = {
+        "ljung_box_statistic": rust_float(ljung["lb_stat"].iloc[0]),
+        "ljung_box_p_value": rust_float(ljung["lb_pvalue"].iloc[0]),
+        "jarque_bera_statistic": rust_float(jb_stat),
+        "jarque_bera_p_value": rust_float(jb_p),
+        "kpss_level_statistic": rust_float(level_stat),
+        "kpss_level_p_value": rust_float(level_p),
+        "kpss_trend_statistic": rust_float(trend_stat),
+        "kpss_trend_p_value": rust_float(trend_p),
         "ar_order": str(order),
         # yule_walker returns sigma, not sigma2, and NaN when sigma2 <= 0.
         "yw_mle_sigma2": rust_float(sigma_mle**2),
@@ -489,6 +507,22 @@ pub struct Case {{
     pub var_biased: f64,
     /// Variance divided by `n - 1`: `np.var(values, ddof=1)`.
     pub var_unbiased: f64,
+    /// `acorr_ljungbox(values, lags=[max_lags], model_df=0)` statistic.
+    pub ljung_box_statistic: f64,
+    /// Its p-value.
+    pub ljung_box_p_value: f64,
+    /// `jarque_bera(values)` statistic.
+    pub jarque_bera_statistic: f64,
+    /// Its p-value.
+    pub jarque_bera_p_value: f64,
+    /// `kpss(values, regression="c", nlags=legacy)` statistic.
+    pub kpss_level_statistic: f64,
+    /// Its p-value.
+    pub kpss_level_p_value: f64,
+    /// `kpss(values, regression="ct", nlags=legacy)` statistic.
+    pub kpss_trend_statistic: f64,
+    /// Its p-value.
+    pub kpss_trend_p_value: f64,
     /// The AR order of the fits below, `min(3, max_lags)`.
     pub ar_order: usize,
     /// `yule_walker(values, ar_order, method="mle")` coefficients.

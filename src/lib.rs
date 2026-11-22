@@ -56,6 +56,9 @@ extern crate std;
 #[cfg(feature = "alloc")]
 pub use crate::autoregressive::{ArCoefficients, burg, yule_walker};
 #[cfg(feature = "alloc")]
+pub use crate::diagnostics::ndiffs;
+pub use crate::diagnostics::{KpssNull, TestResult, jarque_bera, kpss, kpss_lags, ljung_box};
+#[cfg(feature = "alloc")]
 pub use crate::difference::{difference, integrate};
 pub use crate::filter::{ArimaSpec, Filter, FilterError, Seasonal};
 #[cfg(feature = "alloc")]
@@ -71,6 +74,7 @@ use core::borrow::Borrow;
 
 #[cfg(feature = "alloc")]
 mod autoregressive;
+mod diagnostics;
 #[cfg(feature = "alloc")]
 mod difference;
 mod filter;
@@ -81,6 +85,7 @@ mod likelihood;
 mod math;
 mod normal;
 mod polynomial;
+mod special;
 mod state_space;
 mod time_series;
 

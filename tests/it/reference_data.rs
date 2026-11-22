@@ -21,6 +21,22 @@ pub struct Case {
     pub var_biased: f64,
     /// Variance divided by `n - 1`: `np.var(values, ddof=1)`.
     pub var_unbiased: f64,
+    /// `acorr_ljungbox(values, lags=[max_lags], model_df=0)` statistic.
+    pub ljung_box_statistic: f64,
+    /// Its p-value.
+    pub ljung_box_p_value: f64,
+    /// `jarque_bera(values)` statistic.
+    pub jarque_bera_statistic: f64,
+    /// Its p-value.
+    pub jarque_bera_p_value: f64,
+    /// `kpss(values, regression="c", nlags=legacy)` statistic.
+    pub kpss_level_statistic: f64,
+    /// Its p-value.
+    pub kpss_level_p_value: f64,
+    /// `kpss(values, regression="ct", nlags=legacy)` statistic.
+    pub kpss_trend_statistic: f64,
+    /// Its p-value.
+    pub kpss_trend_p_value: f64,
     /// The AR order of the fits below, `min(3, max_lags)`.
     pub ar_order: usize,
     /// `yule_walker(values, ar_order, method="mle")` coefficients.
@@ -88,6 +104,14 @@ pub const RETURNS: Case = Case {
     burg_phi: &[-0.7374519612547827, -0.614442019352254, -0.4465710587237976],
     var_biased: 0.001089,
     var_unbiased: 0.00121,
+    ljung_box_statistic: 2.4312723231664717,
+    ljung_box_p_value: 0.656983356632161,
+    jarque_bera_statistic: 0.7662987123350535,
+    jarque_bera_p_value: 0.6817110739286949,
+    kpss_level_statistic: 0.34412055335968383,
+    kpss_level_p_value: 0.1,
+    kpss_trend_statistic: 0.32947886277107313,
+    kpss_trend_p_value: 0.01,
     ar_order: 3,
     yw_mle_sigma2: 0.0007411655875311765,
     yw_adjusted_sigma2: 0.0005120686080118036,
@@ -368,6 +392,14 @@ pub const AR2: Case = Case {
     ],
     var_biased: 1.2682190262360278,
     var_unbiased: 1.2745919861668622,
+    ljung_box_statistic: 63.9248904729935,
+    ljung_box_p_value: 6.504954637983893e-10,
+    jarque_bera_statistic: 0.9164675514405252,
+    jarque_bera_p_value: 0.6323996192488697,
+    kpss_level_statistic: 0.1786178965305748,
+    kpss_level_p_value: 0.1,
+    kpss_trend_statistic: 0.04740038416563665,
+    kpss_trend_p_value: 0.1,
     ar_order: 3,
     yw_mle_sigma2: 0.8961994558619726,
     yw_adjusted_sigma2: 0.8912500236530447,
@@ -1436,6 +1468,14 @@ pub const SINE: Case = Case {
     burg_phi: &[2.9711461523454608, -2.95860394289661, 0.9874378314541584],
     var_biased: 8.116875,
     var_unbiased: 8.125,
+    ljung_box_statistic: 9523.762376619154,
+    ljung_box_p_value: 0.0,
+    jarque_bera_statistic: 87.96815832976932,
+    jarque_bera_p_value: 7.906005772344743e-20,
+    kpss_level_statistic: 0.14104268345280435,
+    kpss_level_p_value: 0.1,
+    kpss_trend_statistic: 0.06412478689688374,
+    kpss_trend_p_value: 0.1,
     ar_order: 3,
     yw_mle_sigma2: 0.0001709531237015227,
     yw_adjusted_sigma2: f64::NAN,
@@ -1562,6 +1602,14 @@ pub const TREND: Case = Case {
     burg_phi: &[0.6961853089636995, 0.27769485619212864, 0.01354327468293646],
     var_biased: 54.48872505238911,
     var_unbiased: 55.600739849376644,
+    ljung_box_statistic: 264.04923567622683,
+    ljung_box_p_value: 5.999327272489524e-51,
+    jarque_bera_statistic: 2.810739203468032,
+    jarque_bera_p_value: 0.24527638512056393,
+    kpss_level_statistic: 0.5469320687652929,
+    kpss_level_p_value: 0.031096380908717816,
+    kpss_trend_statistic: 0.1435072140662523,
+    kpss_trend_p_value: 0.054616270247680905,
     ar_order: 3,
     yw_mle_sigma2: 8.365164598255824,
     yw_adjusted_sigma2: 6.3954159837724225,
