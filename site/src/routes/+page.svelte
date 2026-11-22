@@ -41,7 +41,7 @@
 	{#if failure}
 		<p class="error" role="alert">Could not load the WebAssembly module: {failure}</p>
 	{:else if api}
-		<ForecastPanel {api} />
+		<ForecastPanel />
 		<StreamPanel {api} />
 		<DriftPanel {api} />
 	{:else}

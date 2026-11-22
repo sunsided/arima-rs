@@ -17,5 +17,7 @@ export default defineConfig({
 				base: (process.argv.includes('dev') ? '' : (process.env.BASE_PATH ?? '')) as '' | `/${string}`
 			}
 		})
-	]
+	],
+	// The fit worker imports the wasm-bindgen glue as an ES module.
+	worker: { format: 'es' }
 });
