@@ -5,3 +5,4 @@ edition = "2021"
 
 [dev-dependencies]
 float-cmp = "0.9.0"
+proptest = "1.12.0"
