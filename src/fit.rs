@@ -136,13 +136,14 @@ impl Arima {
 
     /// Fits the model to `y` by exact maximum likelihood.
     ///
-    /// `NaN` values count as missing. A fit that stops at the iteration limit is still
+    /// `NaN` and infinite values count as missing. A fit that stops at the iteration limit is still
     /// returned, with [`Fitted::converged`] set to `false`.
     ///
     /// # Errors
     ///
-    /// [`FitError::TooShort`] if the differenced series has fewer than
-    /// `p + q + P + Q + 2` non-missing values (one more with a mean).
+    /// - [`FitError::TooShort`] if the differenced series has fewer than
+    ///   `p + q + P + Q + 2` non-missing values (one more with a mean).
+    /// - [`FitError::Degenerate`] if the model fits the series exactly.
     pub fn fit(&self, y: &[f64]) -> Result<Fitted, FitError> {
         self.fit_exog(y, &[], 0)
     }
@@ -152,14 +153,15 @@ impl Arima {
     ///
     /// Like R's `arima(xreg=)` and statsmodels `ARIMA(exog=)` with simple differencing,
     /// the regressors are differenced along with `y`. `beta` starts from least squares
-    /// on the differenced data and is estimated jointly with the rest. A `NaN` regressor
-    /// makes its observation missing.
+    /// on the differenced data and is estimated jointly with the rest. A `NaN` or infinite
+    /// regressor makes its observation missing.
     ///
     /// # Errors
     ///
     /// - [`FitError::RegressorShape`] if `regressors` does not hold `y.len()` rows.
     /// - [`FitError::TooShort`] if the differenced series has fewer than
     ///   `p + q + P + Q + columns + 2` non-missing values (one more with a mean).
+    /// - [`FitError::Degenerate`] if the model fits the series exactly.
     pub fn fit_exog(
         &self,
         y: &[f64],
@@ -174,11 +176,11 @@ impl Arima {
         }
 
         let shape = self.shape(&[], &[], &[], &[]);
-        let dy = differenced(y, &shape);
+        let dy = differenced(&missing_if_infinite(y), &shape);
         let dx: Vec<Vec<f64>> = (0..columns)
             .map(|j| {
                 let column: Vec<f64> = (0..y.len()).map(|t| regressors[t * columns + j]).collect();
-                differenced(&column, &shape)
+                differenced(&missing_if_infinite(&column), &shape)
             })
             .collect();
         let residual = |beta: &[f64], mean: f64| -> Vec<f64> {
@@ -215,8 +217,7 @@ impl Arima {
 
         // The objective takes the steady-state shortcut; the reported values do not.
         let parameters = self.constrain(&minimum.x);
-        let (loglike, sigma2, nobs) =
-            evaluate(&parameters, false).expect("the optimum was evaluated finite");
+        let (loglike, sigma2, nobs) = evaluate(&parameters, false).ok_or(FitError::Degenerate)?;
 
         Ok(Fitted {
             ar: parameters.ar,
@@ -350,6 +351,15 @@ impl Arima {
     }
 }
 
+/// `values` with every infinite entry replaced by `NaN`, so the fit treats it as missing,
+/// as [`AutoArima`]'s differencing tests already do.
+fn missing_if_infinite(values: &[f64]) -> Vec<f64> {
+    values
+        .iter()
+        .map(|&v| if v.is_finite() { v } else { f64::NAN })
+        .collect()
+}
+
 /// Whether observation `t` of the differenced data has a missing value.
 fn residual_is_missing(dy: &[f64], dx: &[Vec<f64>], t: usize) -> bool {
     dy[t].is_nan() || dx.iter().any(|x| x[t].is_nan())
@@ -475,6 +485,10 @@ pub enum FitError {
         /// The non-missing values after differencing.
         present: usize,
     },
+    /// The likelihood has no finite maximum: the model explains the series exactly, so the
+    /// innovation variance is zero (a constant series with a mean, or a straight line with
+    /// a drift). From [`AutoArima`], also when every fitted candidate was rejected.
+    Degenerate,
 }
 
 impl Display for FitError {
@@ -489,6 +503,7 @@ impl Display for FitError {
                     "model needs {needed} values after differencing, got {present}"
                 )
             }
+            FitError::Degenerate => write!(f, "the series leaves no innovation variance"),
         }
     }
 }
@@ -525,6 +540,35 @@ mod tests {
                 present: 2
             }
         );
+    }
+
+    #[test]
+    fn exact_fits_are_degenerate() {
+        assert_eq!(
+            Arima::new(1, 0, 0).fit(&[5.0; 30]),
+            Err(FitError::Degenerate)
+        );
+
+        let line: Vec<f64> = (0..30).map(f64::from).collect();
+        assert_eq!(
+            Arima::new(0, 1, 1).mean(true).fit(&line),
+            Err(FitError::Degenerate)
+        );
+    }
+
+    #[test]
+    fn infinite_values_count_as_missing() {
+        let y: Vec<f64> = (0..40).map(|t| f64::from((t * 7) % 11)).collect();
+        let x: Vec<f64> = (0..40).map(|t| f64::from(t % 5)).collect();
+        let mut with_infinity = y.clone();
+        with_infinity[3] = f64::INFINITY;
+        let mut with_nan = y;
+        with_nan[3] = f64::NAN;
+
+        let model = Arima::new(1, 0, 0);
+        let fitted = model.fit_exog(&with_infinity, &x, 1).unwrap();
+        assert_eq!(fitted, model.fit_exog(&with_nan, &x, 1).unwrap());
+        assert!(fitted.loglike.is_finite() && fitted.sigma2 > 0.0);
     }
 
     #[test]

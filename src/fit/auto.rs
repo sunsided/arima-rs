@@ -203,8 +203,9 @@ impl AutoArima {
     ///
     /// # Errors
     ///
-    /// [`FitError::TooShort`] if no candidate can be fitted, typically because the
-    /// series is too short for even the smallest model after differencing.
+    /// The error of the smallest failed candidate if no candidate can be fitted, typically
+    /// [`FitError::TooShort`] because the series is too short after differencing, or
+    /// [`FitError::Degenerate`] if every fitted candidate was rejected.
     pub fn fit(&self, y: &[f64]) -> Result<AutoFit, FitError> {
         self.fit_exog(y, &[], 0)
     }
@@ -215,8 +216,8 @@ impl AutoArima {
     ///
     /// # Errors
     ///
-    /// [`FitError::RegressorShape`] for a malformed `regressors`, and
-    /// [`FitError::TooShort`] if no candidate can be fitted.
+    /// [`FitError::RegressorShape`] for a malformed `regressors`, otherwise as for
+    /// [`AutoArima::fit`].
     pub fn fit_exog(
         &self,
         y: &[f64],
@@ -289,8 +290,9 @@ struct Search<'a> {
     constant_allowed: bool,
     /// Whether seasonal orders are searched.
     seasonal: bool,
-    /// Every candidate fitted so far, with its criterion (`+inf` when rejected).
-    cache: BTreeMap<Key, (f64, Option<Fitted>)>,
+    /// Every candidate fitted so far, with its criterion (`+inf` when rejected) and its fit
+    /// or the error that stopped it.
+    cache: BTreeMap<Key, (f64, Result<Fitted, FitError>)>,
     /// The best candidate so far.
     best: Option<(Key, f64)>,
 }
@@ -305,21 +307,31 @@ impl Search<'_> {
         }
 
         let candidates = self.cache.len();
-        let (key, criterion) = self.best.ok_or(FitError::TooShort {
-            needed: 0,
-            present: 0,
-        })?;
+        let Some((key, criterion)) = self.best else {
+            return Err(self.first_error());
+        };
+
         let fitted = self
             .cache
             .remove(&key)
-            .and_then(|(_, fitted)| fitted)
-            .expect("the best key was cached");
+            .and_then(|(_, fitted)| fitted.ok())
+            .expect("the best key was cached with its fit");
 
         Ok(AutoFit {
             fitted,
             criterion,
             candidates,
         })
+    }
+
+    /// Why no candidate was selected: the error of the smallest failed candidate (keys sort
+    /// by order, so this is the simplest model), or [`FitError::Degenerate`] if every
+    /// candidate was fitted but rejected.
+    fn first_error(&self) -> FitError {
+        self.cache
+            .values()
+            .find_map(|(_, fitted)| fitted.as_ref().err().copied())
+            .unwrap_or(FitError::Degenerate)
     }
 
     /// The Hyndman–Khandakar stepwise search, in R's move order.
@@ -477,7 +489,7 @@ impl Search<'_> {
     }
 
     /// Fits and scores every key, in parallel with the `rayon` feature.
-    fn score_all(&self, keys: &[Key]) -> Vec<(f64, Option<Fitted>)> {
+    fn score_all(&self, keys: &[Key]) -> Vec<(f64, Result<Fitted, FitError>)> {
         #[cfg(feature = "rayon")]
         {
             use rayon::prelude::*;
@@ -498,7 +510,7 @@ impl Search<'_> {
     /// nothing otherwise (the caller then scores lazily).
     ///
     /// Only as many candidates as the model cap leaves room for are fitted.
-    fn speculate(&self, keys: &[Key]) -> Vec<(f64, Option<Fitted>)> {
+    fn speculate(&self, keys: &[Key]) -> Vec<(f64, Result<Fitted, FitError>)> {
         if cfg!(feature = "rayon") && self.seasonal {
             let room = MAX_STEPWISE_MODELS.saturating_sub(self.cache.len());
             self.score_all(&keys[..keys.len().min(room)])
@@ -533,7 +545,7 @@ impl Search<'_> {
     }
 
     /// Stores a scored candidate and reports whether it became the best model.
-    fn record(&mut self, key: Key, scored: (f64, Option<Fitted>)) -> bool {
+    fn record(&mut self, key: Key, scored: (f64, Result<Fitted, FitError>)) -> bool {
         let score = scored.0;
         self.cache.insert(key, scored);
         let improves = score.is_finite() && self.best.is_none_or(|(_, best)| score < best);
@@ -546,7 +558,7 @@ impl Search<'_> {
 
     /// Fits a candidate and returns its criterion, or `+inf` if it fails or has an inverse
     /// root of modulus above [`MAX_INVERSE_ROOT`].
-    fn score(&self, orders: Orders, constant: bool) -> (f64, Option<Fitted>) {
+    fn score(&self, orders: Orders, constant: bool) -> (f64, Result<Fitted, FitError>) {
         let model = Arima::new(orders.p, self.d, orders.q);
         let model = if self.seasonal {
             model.seasonal(
@@ -559,8 +571,9 @@ impl Search<'_> {
             model
         };
         let model = model.mean(constant);
-        let Ok(fitted) = model.fit_exog(self.y, self.regressors, self.columns) else {
-            return (f64::INFINITY, None);
+        let fitted = match model.fit_exog(self.y, self.regressors, self.columns) {
+            Ok(fitted) => fitted,
+            Err(error) => return (f64::INFINITY, Err(error)),
         };
 
         let value = match self.auto.criterion {
@@ -569,10 +582,10 @@ impl Search<'_> {
             Criterion::Bic => fitted.bic(),
         };
         if !value.is_finite() || near_unit_root(&fitted) {
-            return (f64::INFINITY, Some(fitted));
+            return (f64::INFINITY, Ok(fitted));
         }
 
-        (value, Some(fitted))
+        (value, Ok(fitted))
     }
 }
 
@@ -720,5 +733,26 @@ mod tests {
             .collect();
         assert_eq!(nsdiffs(&noise, 4, 1), 0);
         assert_eq!(nsdiffs(&noise[..7], 4, 1), 0);
+    }
+
+    #[test]
+    fn failed_search_reports_the_simplest_candidate_error() {
+        assert_eq!(
+            AutoArima::new().d(0).fit(&[1.0]),
+            Err(FitError::TooShort {
+                needed: 2,
+                present: 1
+            })
+        );
+    }
+
+    #[test]
+    fn infinite_regressor_counts_as_missing() {
+        let y: Vec<f64> = (0..40).map(|t| f64::from((t * 7) % 11)).collect();
+        let mut x: Vec<f64> = (0..40).map(|t| f64::from(t % 5)).collect();
+        x[10] = f64::INFINITY;
+
+        let best = AutoArima::new().fit_exog(&y, &x, 1).unwrap();
+        assert!(best.criterion.is_finite());
     }
 }

@@ -121,8 +121,8 @@ pub fn loglike_exog(
 /// All innovation variances scale with `sigma2`, so the filter runs once with
 /// `sigma2 = 1`, and the maximising `sigma2 = sum(v_t^2 / F_t) / n` follows in closed
 /// form over the `n` non-missing values. Returns `(log-likelihood, sigma2, n)`, the
-/// same maximum as the full likelihood, or [`None`] if the model is invalid or no
-/// value is present.
+/// same maximum as the full likelihood, or [`None`] if the model is invalid, no
+/// value is present, or `sigma2` is not positive (the model fits `w` exactly).
 pub(crate) fn concentrated(
     w: &[f64],
     shape: &ArimaSpec<'_>,
@@ -154,6 +154,10 @@ pub(crate) fn concentrated(
 
     let n = count as f64;
     let sigma2 = weighted / n;
+    if sigma2.is_nan() || sigma2 <= 0.0 {
+        return None;
+    }
+
     let llf =
         -0.5 * (n * (math::ln(core::f64::consts::TAU) + 1.0 + math::ln(sigma2)) + log_variances);
 
