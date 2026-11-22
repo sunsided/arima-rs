@@ -11,7 +11,7 @@ categories = ["mathematics", "science", "no-std", "no-std::no-alloc", "embedded"
 edition = "2024"
 # `f64::abs` is in `core` (needed without `std`) since 1.85.
 rust-version = "1.85"
-exclude = ["/ci", "/docs", "/.github"]
+exclude = ["/ci", "/docs", "/.github", "/bindings"]
 
 [features]
 default = ["std"]

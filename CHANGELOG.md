@@ -28,6 +28,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   `refit_scratch_len` and `coefficient_len`. `Refitter` holds both buffers inline, `RefitOptions` sets the mean and
   the iteration limit, and `Refit` returns the new spec with its log-likelihood. `FitError` is available without
   `alloc` and gains `BufferTooSmall`. `examples/device_refit.rs` shows a drift-check-and-refit loop.
+- `bindings/wasm`: the `@sunsided/backshift` npm package (WebAssembly, ES module) with `Model.fit`,
+  `Model.autoArima`, forecasts with intervals, `Stream` for streaming innovations, `refit` and `ljungBox`, built
+  with the `libm` backend. `publish-npm.yml` publishes it to GitHub Packages and npmjs.com on `wasm-v*` tags.
 - Criterion benchmarks (`cargo bench`) and `ci/compare`, a comparison with foresight and anofox-forecast.
 
 ### Performance

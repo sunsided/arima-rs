@@ -1,0 +1,211 @@
+name: Publish npm package
+
+# Push a tag `wasm-v1.2.3` (or `wasm-v1.2.3-rc.1` for a prerelease) to build the
+# `@sunsided/backshift` WebAssembly package, attach it to a GitHub release, and publish it
+# to GitHub Packages and npmjs.com. The tag must match the version in
+# bindings/wasm/Cargo.toml. The crate's own `v*` tags do not trigger this workflow.
+#
+# npmjs.com uses trusted publishing and stays off until the repository variable
+# PUBLISH_NPM is "true": a trusted publisher can only be set up for a package that
+# already exists, so the first version has to be published by hand (repository
+# sunsided/arima-rs, workflow publish-npm.yml, environment `npm`).
+on:
+  push:
+    tags:
+      - 'wasm-v[0-9]+.[0-9]+.[0-9]+'
+      - 'wasm-v[0-9]+.[0-9]+.[0-9]+-*'
+
+permissions: {}
+
+concurrency:
+  group: publish-npm-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml # zizmor: ignore[self-repository]
+    permissions:
+      contents: read
+
+  build:
+    name: Build and pack
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check tag matches the package version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 --manifest-path bindings/wasm/Cargo.toml \
+            | jq -r '.packages[] | select(.name == "backshift-wasm") | .version')"
+          if [[ "$TAG" != "wasm-v$version" ]]; then
+            echo "::error::tag $TAG does not match bindings/wasm version $version"
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      # No build cache on purpose: this workflow publishes what it builds.
+
+      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: wasm-pack
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Build
+        run: bindings/wasm/build.sh
+
+      - name: Smoke test
+        run: node bindings/wasm/tests/smoke.mjs
+
+      - name: Pack
+        working-directory: bindings/wasm/pkg
+        run: |
+          npm pack
+          mv sunsided-backshift-*.tgz ../../../package.tgz
+
+      - name: Upload package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: npm-package
+          path: package.tgz
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Create GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    # The only job with write access to the repository; it runs no project code.
+    permissions:
+      contents: write
+    steps:
+      - name: Download package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: npm-package
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#wasm-v}"
+          mv package.tgz "sunsided-backshift-${version}.tgz"
+          notes="The [\`@sunsided/backshift\`](https://www.npmjs.com/package/@sunsided/backshift/v/${version}) WebAssembly package, also on GitHub Packages:
+
+          \`\`\`sh
+          npm install @sunsided/backshift@${version}
+          \`\`\`"
+          flags=(--verify-tag --notes "$notes" --title "@sunsided/backshift ${version}")
+          # A suffix like -rc.1 marks a prerelease.
+          if [[ "$TAG" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$TAG" "${flags[@]}" "sunsided-backshift-${version}.tgz"
+
+  publish-github:
+    name: Publish to GitHub Packages
+    # After the GitHub release, so a failed release doesn't leave a published package behind.
+    needs: [build, release]
+    runs-on: ubuntu-latest
+    # Publishes the tarball built above; runs no project code (lifecycle scripts are skipped).
+    permissions:
+      packages: write
+    environment:
+      name: github-packages
+      url: https://github.com/sunsided/arima-rs/pkgs/npm/backshift
+    steps:
+      - name: Download package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: npm-package
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          registry-url: https://npm.pkg.github.com
+          scope: '@sunsided'
+          package-manager-cache: false
+
+      # GitHub Packages authenticates with GITHUB_TOKEN; npm's trusted publishing is for npmjs.com.
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: | # zizmor: ignore[use-trusted-publishing]
+          # Re-runs: a version can only be published once.
+          version="${TAG#wasm-v}"
+          if npm view "@sunsided/backshift@${version}" version >/dev/null 2>&1; then
+            echo "::notice::@sunsided/backshift@${version} is already published"
+            exit 0
+          fi
+          flags=(--ignore-scripts)
+          # Prereleases don't become `latest`.
+          if [[ "$TAG" == *-* ]]; then flags+=(--tag next); fi
+          npm publish package.tgz "${flags[@]}"
+
+  publish-npm:
+    name: Publish to npmjs.com
+    needs: [build, release]
+    if: vars.PUBLISH_NPM == 'true'
+    runs-on: ubuntu-latest
+    # Trusted publishing: npm exchanges the workflow's OIDC token, no secret needed. Configure
+    # it on npmjs.com under the package's settings (repository sunsided/arima-rs, workflow
+    # publish-npm.yml, environment npm). Publishes the tarball built above; lifecycle scripts
+    # are skipped.
+    permissions:
+      id-token: write
+    environment:
+      name: npm
+      url: ${{ steps.publish.outputs.url }}
+    steps:
+      - name: Download package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: npm-package
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Publish
+        id: publish
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#wasm-v}"
+          echo "url=https://www.npmjs.com/package/@sunsided/backshift/v/${version}" >> "$GITHUB_OUTPUT"
+          # Trusted publishing needs npm 11.5.1 or newer.
+          npm_version="$(npm --version)"
+          if [[ "$(printf '%s\n' 11.5.1 "$npm_version" | sort -V | head -n1)" != 11.5.1 ]]; then
+            echo "::error::npm $npm_version is too old for trusted publishing (needs 11.5.1+)"
+            exit 1
+          fi
+          # Re-runs: a version can only be published once.
+          if npm view "@sunsided/backshift@${version}" version >/dev/null 2>&1; then
+            echo "::notice::@sunsided/backshift@${version} is already on npmjs.com"
+            exit 0
+          fi
+          flags=(--ignore-scripts --access public --loglevel verbose)
+          # Prereleases don't become `latest`.
+          if [[ "$TAG" == *-* ]]; then flags+=(--tag next); fi
+          npm publish package.tgz "${flags[@]}"

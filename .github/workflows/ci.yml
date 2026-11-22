@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # publish-npm.yml runs these checks before it publishes.
+  workflow_call:
 
 permissions:
   contents: read
@@ -76,3 +78,31 @@ jobs:
       - run: cargo check --lib
       - run: cargo check --lib --no-default-features --features libm
       - run: cargo check --lib --no-default-features --features libm,alloc
+
+  wasm-package:
+    name: npm package (wasm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: wasm-pack
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      # The bindings are their own workspace, so the root jobs do not see them.
+      - run: cargo fmt --check --manifest-path bindings/wasm/Cargo.toml
+      - run: cargo clippy --locked --manifest-path bindings/wasm/Cargo.toml --target wasm32-unknown-unknown -- -D warnings
+      - run: bindings/wasm/build.sh
+      - run: node bindings/wasm/tests/smoke.mjs
+      - run: npm pack --dry-run
+        working-directory: bindings/wasm/pkg
+
