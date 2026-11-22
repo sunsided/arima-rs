@@ -496,9 +496,12 @@ impl Search<'_> {
 
     /// Scores all `keys` in parallel for a seasonal search with the `rayon` feature, and
     /// nothing otherwise (the caller then scores lazily).
+    ///
+    /// Only as many candidates as the model cap leaves room for are fitted.
     fn speculate(&self, keys: &[Key]) -> Vec<(f64, Option<Fitted>)> {
         if cfg!(feature = "rayon") && self.seasonal {
-            self.score_all(keys)
+            let room = MAX_STEPWISE_MODELS.saturating_sub(self.cache.len());
+            self.score_all(&keys[..keys.len().min(room)])
         } else {
             Vec::new()
         }

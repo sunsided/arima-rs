@@ -197,7 +197,7 @@ impl Arima {
 
         let beta_start = self.least_squares_start(&dy, &dx);
         let start = self.start(&residual(&beta_start, 0.0), &beta_start);
-        let evaluate = |parameters: &Parameters| {
+        let evaluate = |parameters: &Parameters, steady: bool| {
             let centered = residual(&parameters.exog, parameters.mean);
             let shape = self.shape(
                 &parameters.ar,
@@ -205,17 +205,18 @@ impl Arima {
                 &parameters.seasonal_ar,
                 &parameters.seasonal_ma,
             );
-            concentrated(&centered, &shape)
+            concentrated(&centered, &shape, steady)
         };
-        let objective = |u: &[f64]| match evaluate(&self.constrain(u)) {
+        let objective = |u: &[f64]| match evaluate(&self.constrain(u), true) {
             Some((llf, _, n)) => -llf / n as f64,
             None => f64::INFINITY,
         };
         let minimum = bfgs::minimize(objective, start, bfgs::Options::default());
 
+        // The objective takes the steady-state shortcut; the reported values do not.
         let parameters = self.constrain(&minimum.x);
         let (loglike, sigma2, nobs) =
-            evaluate(&parameters).expect("the optimum was evaluated finite");
+            evaluate(&parameters, false).expect("the optimum was evaluated finite");
 
         Ok(Fitted {
             ar: parameters.ar,
@@ -552,6 +553,25 @@ mod tests {
 
         let tiny = Fitted { nobs: 6, ..fitted };
         assert_eq!(tiny.aicc(), f64::INFINITY);
+    }
+
+    #[test]
+    fn reported_loglike_is_exact() {
+        // A long series, so the objective's steady-state shortcut does kick in.
+        let mut y = alloc::vec![0.0; 400];
+        let mut state = 5_u32;
+        for t in 1..y.len() {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            y[t] = 0.5 * y[t - 1] + f64::from(state >> 8) / f64::from(1_u32 << 24) - 0.5;
+        }
+
+        let fitted = Arima::new(1, 0, 1).fit(&y).unwrap();
+        let exact = crate::loglike(&y, &fitted.spec()).unwrap();
+        assert!(
+            (fitted.loglike - exact).abs() < 1e-10,
+            "{} vs {exact}",
+            fitted.loglike
+        );
     }
 
     #[test]

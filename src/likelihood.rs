@@ -114,15 +114,20 @@ pub fn loglike_exog(
 /// The log-likelihood of the already differenced, demeaned series `w` under the ARMA part
 /// of `shape` (its AR and MA terms, seasonal ones included), with `sigma2` concentrated out.
 ///
-/// This is the fitting objective, so it takes statsmodels' steady-state shortcut (see
-/// [`Workspace::run_steady`]); the fit recomputes its reported likelihood exactly.
+/// With `steady` it takes statsmodels' steady-state shortcut (see [`Workspace::run_steady`]),
+/// which the fitting objective uses; without it the full recursion runs, which the fit
+/// uses for the likelihood and `sigma2` it reports.
 ///
 /// All innovation variances scale with `sigma2`, so the filter runs once with
 /// `sigma2 = 1`, and the maximising `sigma2 = sum(v_t^2 / F_t) / n` follows in closed
 /// form over the `n` non-missing values. Returns `(log-likelihood, sigma2, n)`, the
 /// same maximum as the full likelihood, or [`None`] if the model is invalid or no
 /// value is present.
-pub(crate) fn concentrated(w: &[f64], shape: &ArimaSpec<'_>) -> Option<(f64, f64, usize)> {
+pub(crate) fn concentrated(
+    w: &[f64],
+    shape: &ArimaSpec<'_>,
+    steady: bool,
+) -> Option<(f64, f64, usize)> {
     let spec = ArimaSpec {
         d: 0,
         mean: 0.0,
@@ -130,15 +135,19 @@ pub(crate) fn concentrated(w: &[f64], shape: &ArimaSpec<'_>) -> Option<(f64, f64
         ..*shape
     };
     let (mut count, mut log_variances, mut weighted) = (0_usize, 0.0, 0.0);
-    Workspace::new(&spec)
-        .ok()?
-        .run_steady(w, |Innovation { value, variance }| {
-            if !value.is_nan() {
-                count += 1;
-                log_variances += math::ln(variance);
-                weighted += value * value / variance;
-            }
-        });
+    let sink = |Innovation { value, variance }: Innovation| {
+        if !value.is_nan() {
+            count += 1;
+            log_variances += math::ln(variance);
+            weighted += value * value / variance;
+        }
+    };
+    let workspace = Workspace::new(&spec).ok()?;
+    if steady {
+        workspace.run_steady(w, sink);
+    } else {
+        workspace.run(w, sink);
+    }
     if count == 0 {
         return None;
     }
