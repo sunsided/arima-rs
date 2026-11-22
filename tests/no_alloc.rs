@@ -99,9 +99,10 @@ fn main() {
         backshift::kpss(&history, backshift::KpssNull::Level, 2),
     ));
 
+    // A ramp with an irregular sawtooth on top: plain arithmetic, and far from an exact fit.
     let window: [f64; WINDOW] = core::array::from_fn(|t| {
-        let t = f64::from(u32::try_from(t).expect("small"));
-        0.2 * t + (t * 1.7).sin()
+        let wobble = f64::from(u32::try_from((t * 7) % 5).expect("small"));
+        0.2 * f64::from(u32::try_from(t).expect("small")) + wobble / 4.0
     });
     let mut refitter = REFITTER.lock().expect("not poisoned");
     let refit = refitter

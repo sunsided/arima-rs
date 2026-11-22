@@ -116,7 +116,9 @@ impl<'a> Objective<'a> {
     }
 
     /// The range (largest minus smallest) of the non-missing differenced values: the
-    /// spread of the data, whatever its offset. Zero without any value.
+    /// spread of the data, whatever its offset. Zero when they are all equal or none is
+    /// present; the floor then only rejects `sigma2 = 0`, and a constant series is left to
+    /// the callers (`refit` rejects it, `AutoArima` picks white noise for it).
     fn range(&self) -> f64 {
         let (low, high) = self
             .dy
