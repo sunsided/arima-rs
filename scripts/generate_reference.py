@@ -133,6 +133,62 @@ ARMA_CASES = [
     ("RANDOM_WALK", "ARIMA(0, 1, 0): a random walk.", [], 1, [], 0.0, 1.0, None),
 ]
 
+# Seasonal cases: the same fields plus (seasonal ar, D, seasonal ma, period).
+SEASONAL_CASES = [
+    ("SAR4", "ARIMA(1, 0, 0)(1, 0, 0, 4) with mean 2.", [0.4], 0, [], 2.0, 1.0, None, ([0.5], 0, [], 4)),
+    ("SMA4", "ARIMA(0, 0, 1)(0, 0, 1, 4).", [], 0, [0.3], 0.0, 0.8, None, ([], 0, [0.6], 4)),
+    ("AIRLINE4", "The airline model ARIMA(0, 1, 1)(0, 1, 1, 4).", [], 1, [-0.4], 0.0, 1.0, None, ([], 1, [-0.6], 4)),
+    ("SARIMA4", "ARIMA(1, 1, 0)(1, 1, 0, 4).", [0.3], 1, [], 0.0, 1.0, None, ([-0.4], 1, [], 4)),
+    ("SAR12", "ARIMA(1, 0, 0)(1, 0, 0, 12) with mean -1.", [0.5], 0, [], -1.0, 1.0, None, ([0.6], 0, [], 12)),
+]
+
+NO_SEASON = ([], 0, [], 0)
+
+
+def seasonal_series(ar, d, ma, mean, sigma2, seed, seasonal):
+    """Simulate ARMA_LENGTH raw values of a seasonal ARIMA model.
+
+    The ARMA part uses the expanded polynomials; the raw series then integrates the
+    differencing polynomial from k starting values of 10.
+    """
+    sar, seasonal_d, sma, s = seasonal
+    ar_poly = np.convolve(np.r_[1.0, -np.array(ar, float)], lag_polynomial(sar, s, -1.0))
+    ma_poly = np.convolve(np.r_[1.0, np.array(ma, float)], lag_polynomial(sma, s, 1.0))
+    delta = differencing_polynomial(d, seasonal_d, s)
+    k = len(delta) - 1
+    w = arma_series(list(-ar_poly[1:]), list(ma_poly[1:]), sigma2, seed, ARMA_LENGTH - k) + mean
+    y = np.full(ARMA_LENGTH, 10.0)
+    for t in range(k, ARMA_LENGTH):
+        y[t] = w[t - k] - np.dot(delta[1:], y[t - 1 :: -1][:k]) if k else w[t]
+    return y
+
+
+def lag_polynomial(coefficients, period, sign):
+    """`1 + sign * sum c_j B^(j period)` as a coefficient array."""
+    poly = np.zeros(len(coefficients) * period + 1)
+    poly[0] = 1.0
+    for j, c in enumerate(coefficients):
+        poly[(j + 1) * period] = sign * c
+    return poly
+
+
+def differencing_polynomial(d, seasonal_d, period):
+    """The coefficients of `(1 - B)^d (1 - B^s)^D`."""
+    delta = np.array([1.0])
+    for _ in range(d):
+        delta = np.convolve(delta, [1.0, -1.0])
+    for _ in range(seasonal_d):
+        delta = np.convolve(delta, lag_polynomial([1.0], period, -1.0))
+    return delta
+
+
+def simple_difference(y, d, seasonal_d, period):
+    """`(1 - B)^d (1 - B^s)^D y` as statsmodels' simple differencing computes it."""
+    w = np.diff(y, n=d)
+    for _ in range(seasonal_d):
+        w = w[period:] - w[:-period]
+    return w
+
 
 def arima_series(ar, d, ma, mean, sigma2, seed):
     """Simulate ARMA_LENGTH raw values whose `d`-th difference is the ARMA series plus `mean`."""
@@ -166,48 +222,60 @@ def exact_filter(model, params):
     return model.filter(params)
 
 
-def exact_extend(head, tail, order, params):
+def exact_extend(head, tail, order, params, seasonal_order=(0, 0, 0, 0)):
     """`head.extend(tail)` without the steady-state shortcut.
 
     `extend` clones the model, which resets the tolerance, so this repeats what it
     does: a new model on `tail`, known-initialised from `head`'s last predicted state.
     """
-    model = SARIMAX(tail, order=order, trend="n")
+    model = SARIMAX(tail, order=order, seasonal_order=seasonal_order, trend="n")
     model.ssm.initialize_known(head.predicted_state[:, -1], head.predicted_state_cov[:, :, -1])
     return exact_filter(model, params)
 
 
-def forecast_model(y, ar, d, ma, mean):
+def forecast_model(y, ar, d, ma, mean, seasonal):
     """The statsmodels model whose forecasts are on the original scale, with its trend parameters."""
+    sar, seasonal_d, sma, s = seasonal
     order = (len(ar), d, len(ma))
+    seasonal_order = (len(sar), seasonal_d, len(sma), s)
     if mean == 0.0:
-        return SARIMAX(y, order=order, trend="n"), []
+        return SARIMAX(y, order=order, seasonal_order=seasonal_order, trend="n"), []
     trend = {0: "c", 1: "t"}[d]
-    return ARIMA(y, order=order, trend=trend), [mean]
+    return ARIMA(y, order=order, seasonal_order=seasonal_order, trend=trend), [mean]
 
 
-def arma_case(index, name, doc, ar, d, ma, mean, sigma2, missing):
+def arma_case(index, name, doc, ar, d, ma, mean, sigma2, missing, seasonal=NO_SEASON):
     """Render one `ArmaCase` constant from statsmodels filters at fixed parameters.
 
     Innovations and the likelihood come from SARIMAX on `diff(y, d) - mean` (simple
     differencing). Forecasts come from statsmodels' own original-scale model.
     """
-    y = arima_series(ar, d, ma, mean, sigma2, seed=100 + index)
+    sar, seasonal_d, sma, s = seasonal
+    if seasonal == NO_SEASON:
+        y = arima_series(ar, d, ma, mean, sigma2, seed=100 + index)
+    else:
+        y = seasonal_series(ar, d, ma, mean, sigma2, 100 + index, seasonal)
     if missing is not None:
         y[missing] = np.nan
-    w = np.diff(y, n=d) - mean
+    k = d + seasonal_d * s
+    raw_w = simple_difference(y, d, seasonal_d, s)
+    w = raw_w - mean
     order = (len(ar), 0, len(ma))
-    params = [*ar, *ma, sigma2]
-    full = exact_filter(SARIMAX(w, order=order, trend="n"), params)
-    head = exact_filter(SARIMAX(w[: ARMA_SPLIT - d], order=order, trend="n"), params)
-    extended = exact_extend(head, w[ARMA_SPLIT - d :], order, params)
+    stationary_seasonal = (len(sar), 0, len(sma), s)
+    params = [*ar, *ma, *sar, *sma, sigma2]
 
-    fit_with_mean = d == 0 or mean != 0.0
-    raw_w = np.diff(y, n=d)
-    fit = ARIMA(raw_w, order=order, trend="c" if fit_with_mean else "n").fit()
+    def arma_model(series):
+        return SARIMAX(series, order=order, seasonal_order=stationary_seasonal, trend="n")
+
+    full = exact_filter(arma_model(w), params)
+    head = exact_filter(arma_model(w[: ARMA_SPLIT - k]), params)
+    extended = exact_extend(head, w[ARMA_SPLIT - k :], order, params, stationary_seasonal)
+
+    fit_with_mean = (d == 0 and seasonal_d == 0) or mean != 0.0
+    fit = ARIMA(raw_w, order=order, seasonal_order=stationary_seasonal, trend="c" if fit_with_mean else "n").fit()
     fit_params = dict(zip(fit.model.param_names, fit.params))
 
-    model, trend_params = forecast_model(y, ar, d, ma, mean)
+    model, trend_params = forecast_model(y, ar, d, ma, mean, seasonal)
     forecast = exact_filter(model, [*trend_params, *params]).get_forecast(ARMA_HORIZON)
 
     arrays = {
@@ -228,8 +296,12 @@ def arma_case(index, name, doc, ar, d, ma, mean, sigma2, missing):
     arrays |= {
         "fit_ar": [fit_params[f"ar.L{i + 1}"] for i in range(len(ar))],
         "fit_ma": [fit_params[f"ma.L{i + 1}"] for i in range(len(ma))],
+        "seasonal_ar": sar,
+        "seasonal_ma": sma,
+        "fit_seasonal_ar": [fit_params[f"ar.S.L{(i + 1) * s}"] for i in range(len(sar))],
+        "fit_seasonal_ma": [fit_params[f"ma.S.L{(i + 1) * s}"] for i in range(len(sma))],
     }
-    if np.isnan(raw_w).any():
+    if np.isnan(raw_w).any() or seasonal != NO_SEASON:
         hr_lines = ["    hannan_rissanen: None,"]
     else:
         centered = raw_w - (raw_w.mean() if fit_with_mean else 0.0)
@@ -249,6 +321,8 @@ def arma_case(index, name, doc, ar, d, ma, mean, sigma2, missing):
         f"    fit_aicc: {rust_float(fit.aicc)},",
         f"    fit_bic: {rust_float(fit.bic)},",
         f"    d: {d},",
+        f"    seasonal_d: {seasonal_d},",
+        f"    period: {s},",
         f"    mean: {rust_float(mean)},",
         f"    sigma2: {rust_float(sigma2)},",
         f"    loglike: {rust_float(full.llf)},",
@@ -277,6 +351,14 @@ pub struct ArmaCase {{
     pub ar: &'static [f64],
     /// The differencing order.
     pub d: usize,
+    /// The seasonal AR coefficients.
+    pub seasonal_ar: &'static [f64],
+    /// The seasonal differencing order.
+    pub seasonal_d: usize,
+    /// The seasonal MA coefficients.
+    pub seasonal_ma: &'static [f64],
+    /// The season length; 0 for non-seasonal cases.
+    pub period: usize,
     /// The mean of the differenced series.
     pub mean: f64,
     /// The MA coefficients.
@@ -308,6 +390,10 @@ pub struct ArmaCase {{
     pub fit_ar: &'static [f64],
     /// MA estimates of the same fit.
     pub fit_ma: &'static [f64],
+    /// Seasonal AR estimates of the same fit.
+    pub fit_seasonal_ar: &'static [f64],
+    /// Seasonal MA estimates of the same fit.
+    pub fit_seasonal_ma: &'static [f64],
     /// The `const` estimate of the same fit, or 0.
     pub fit_mean: f64,
     /// The `sigma2` estimate of the same fit.
@@ -331,9 +417,10 @@ pub struct ArmaCase {{
 }}
 
 /// All ARMA reference cases.
-pub const ALL: &[&ArmaCase] = &[{", ".join(f"&{case[0]}" for case in ARMA_CASES)}];
+pub const ALL: &[&ArmaCase] = &[{", ".join(f"&{case[0]}" for case in ARMA_CASES + SEASONAL_CASES)}];
 '''
-    body = "\n\n".join(arma_case(i, *case) for i, case in enumerate(ARMA_CASES))
+    cases = ARMA_CASES + SEASONAL_CASES
+    body = "\n\n".join(arma_case(i, *case) for i, case in enumerate(cases))
     ARMA_OUTPUT.write_text(header + "\n" + body + "\n")
 
 

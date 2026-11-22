@@ -26,8 +26,7 @@ pub extern "C" fn _start() -> ! {
         ar: &[0.5],
         d: 1,
         ma: &[0.3],
-        mean: 0.0,
-        sigma2: 1.0,
+        ..backshift::ArimaSpec::default()
     };
     if let Ok(mut filter) = backshift::Filter::<4>::new(&spec) {
         filter.warm_up(&x);

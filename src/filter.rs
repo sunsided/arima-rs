@@ -15,71 +15,160 @@
 //! - Forecasts and their variances are on the original scale and match statsmodels
 //!   `ARIMA(y, order=(p, d, q), trend=...).filter(params).get_forecast(h)`.
 
-use crate::math;
 use crate::normal::normal_quantile;
 use crate::state_space::{self, Innovation, LyapunovScratch, System};
+use crate::{math, polynomial};
 use core::error::Error;
 use core::fmt::{Display, Formatter};
 
-/// The parameters of an ARIMA(p, d, q) model.
+/// The parameters of a seasonal ARIMA(p, d, q)(P, D, Q, s) model.
 ///
-/// With `w_t = (1 - B)^d y_t - mean`, the differenced series follows
-/// `w_t = phi_1 w_(t-1) + ... + phi_p w_(t-p) + e_t + theta_1 e_(t-1) + ... + theta_q e_(t-q)`,
-/// with `Var(e_t) = sigma2`. This is the sign convention of statsmodels and R.
+/// With `w_t = (1 - B)^d (1 - B^s)^D y_t - mean`, the differenced series follows
+/// `phi(B) Phi(B^s) w_t = theta(B) Theta(B^s) e_t` with `Var(e_t) = sigma2`, where
+/// `phi(B) = 1 - phi_1 B - ... - phi_p B^p` and `theta(B) = 1 + theta_1 B + ... + theta_q B^q`
+/// (and likewise for the seasonal `Phi` and `Theta`). This is the sign convention of
+/// statsmodels and R. Leave [`ArimaSpec::seasonal`] at [`Seasonal::NONE`] for a
+/// non-seasonal model.
 ///
 /// # Examples
 ///
 /// ```
-/// use backshift::ArimaSpec;
+/// use backshift::{ArimaSpec, Seasonal};
 ///
 /// // ARIMA(1, 1, 1) with drift 0.2.
-/// let spec = ArimaSpec { ar: &[0.5], d: 1, ma: &[0.3], mean: 0.2, sigma2: 1.0 };
+/// let spec = ArimaSpec { ar: &[0.5], d: 1, ma: &[0.3], mean: 0.2, ..ArimaSpec::default() };
 /// assert_eq!(spec.states(), 3);
+///
+/// // The airline model ARIMA(0, 1, 1)(0, 1, 1, 12).
+/// let seasonal = Seasonal { ar: &[], d: 1, ma: &[-0.6], period: 12 };
+/// let airline = ArimaSpec { d: 1, ma: &[-0.4], seasonal, ..ArimaSpec::default() };
+/// assert_eq!(airline.states(), 14 + 13);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ArimaSpec<'a> {
     /// The AR coefficients `phi_1, ..., phi_p`. May be empty.
     pub ar: &'a [f64],
-    /// How often the series is differenced before the ARMA part applies.
+    /// How often the series is differenced (at lag 1) before the ARMA part applies.
     pub d: usize,
     /// The MA coefficients `theta_1, ..., theta_q`. May be empty.
     pub ma: &'a [f64],
-    /// The mean of the differenced series: the mean for `d = 0`, the drift for `d = 1`.
+    /// The seasonal part; [`Seasonal::NONE`] for a non-seasonal model.
+    pub seasonal: Seasonal<'a>,
+    /// The mean of the differenced series: the mean for `d = D = 0`, the drift for `d = 1, D = 0`.
     pub mean: f64,
     /// The innovation variance. Must be positive and finite.
     pub sigma2: f64,
 }
 
+/// The seasonal part `(P, D, Q, s)` of a seasonal ARIMA model.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Seasonal<'a> {
+    /// The seasonal AR coefficients `Phi_1, ..., Phi_P`, at lags `s, 2s, ...`.
+    pub ar: &'a [f64],
+    /// How often the series is differenced at lag `s`.
+    pub d: usize,
+    /// The seasonal MA coefficients `Theta_1, ..., Theta_Q`, at lags `s, 2s, ...`.
+    pub ma: &'a [f64],
+    /// The season length `s`. At least 1 unless the seasonal part is empty.
+    pub period: usize,
+}
+
+impl Seasonal<'static> {
+    /// No seasonal part.
+    pub const NONE: Self = Self {
+        ar: &[],
+        d: 0,
+        ma: &[],
+        period: 0,
+    };
+}
+
+impl Default for Seasonal<'_> {
+    fn default() -> Self {
+        Seasonal::NONE
+    }
+}
+
+impl Seasonal<'_> {
+    /// Whether the seasonal part has any term.
+    fn is_empty(&self) -> bool {
+        self.ar.is_empty() && self.d == 0 && self.ma.is_empty()
+    }
+}
+
+impl Default for ArimaSpec<'_> {
+    /// White noise with unit variance: no AR, MA, differencing or mean.
+    fn default() -> Self {
+        Self {
+            ar: &[],
+            d: 0,
+            ma: &[],
+            seasonal: Seasonal::NONE,
+            mean: 0.0,
+            sigma2: 1.0,
+        }
+    }
+}
+
 impl ArimaSpec<'_> {
-    /// The smallest capacity `R` a [`Filter`] needs for this model: `max(p, q + 1) + d`.
+    /// The smallest capacity `R` a [`Filter`] needs for this model:
+    /// `max(p + P s, q + Q s + 1) + d + D s`.
     #[must_use]
     pub fn states(&self) -> usize {
-        self.arma_states() + self.d
+        self.arma_states() + self.differencing_order()
     }
 
-    /// The state dimension of the ARMA part, `max(p, q + 1)`.
+    /// The state dimension of the expanded ARMA part, `max(p + P s, q + Q s + 1)`.
     pub(crate) fn arma_states(&self) -> usize {
-        self.ar.len().max(self.ma.len() + 1)
+        let s = self.seasonal.period;
+        let ar = self.ar.len() + self.seasonal.ar.len() * s;
+        let ma = self.ma.len() + self.seasonal.ma.len() * s;
+        ar.max(ma + 1)
     }
 
-    /// Checks that every parameter is finite and `sigma2` is positive.
+    /// The degree of the differencing polynomial, `d + D s`.
+    pub(crate) fn differencing_order(&self) -> usize {
+        self.d + self.seasonal.d * self.seasonal.period
+    }
+
+    /// Checks that every parameter is finite, `sigma2` is positive, and a non-empty
+    /// seasonal part has a period.
     pub(crate) fn validate(&self) -> Result<(), FilterError> {
-        let finite = self.ar.iter().chain(self.ma).all(|c| c.is_finite());
-        if !finite || !self.mean.is_finite() || !self.sigma2.is_finite() || self.sigma2 <= 0.0 {
+        let seasonal = &self.seasonal;
+        let coefficients = self
+            .ar
+            .iter()
+            .chain(self.ma)
+            .chain(seasonal.ar)
+            .chain(seasonal.ma);
+        let finite = coefficients.copied().all(f64::is_finite);
+        let period_ok = seasonal.is_empty() || seasonal.period > 0;
+        if !finite
+            || !period_ok
+            || !self.mean.is_finite()
+            || !self.sigma2.is_finite()
+            || self.sigma2 <= 0.0
+        {
             return Err(FilterError::InvalidParameter);
         }
 
         Ok(())
     }
 
-    /// Writes the padded first column of `T` and the selection vector into the first `r` entries.
-    pub(crate) fn pad_into(&self, phi: &mut [f64], selection: &mut [f64]) {
+    /// Expands the model into the first column of `T`, the selection vector and the
+    /// differencing polynomial: `phi[..r]`, `selection[..r]` and `delta[..=k]`.
+    ///
+    /// Requires `phi` and `selection` to hold `r = arma_states()` values and `delta` `k + 1`.
+    pub(crate) fn expand_into(&self, phi: &mut [f64], selection: &mut [f64], delta: &mut [f64]) {
         let r = self.arma_states();
+        let s = self.seasonal.period;
         phi[..r].fill(0.0);
         selection[..r].fill(0.0);
-        phi[..self.ar.len()].copy_from_slice(self.ar);
+
+        polynomial::seasonal_product(self.ar, self.seasonal.ar, s, -1.0, phi);
         selection[0] = 1.0;
-        selection[1..=self.ma.len()].copy_from_slice(self.ma);
+        polynomial::seasonal_product(self.ma, self.seasonal.ma, s, 1.0, &mut selection[1..]);
+        polynomial::differencing(self.d, self.seasonal.d, s, delta);
     }
 }
 
@@ -121,7 +210,7 @@ impl Error for FilterError {}
 
 /// A streaming ARIMA filter with room for `R` states, stored inline with no heap.
 ///
-/// `R` must be at least [`ArimaSpec::states`]. Its size is about `8 (R² + 4R)` bytes.
+/// `R` must be at least [`ArimaSpec::states`]. Its size is about `8 (R² + 6R)` bytes.
 /// [`Filter::new`] uses about three times that on the stack while it computes the
 /// starting covariance, and [`Filter::forecast_into`] about twice. The filter is
 /// `Copy`, so it can be snapshotted cheaply.
@@ -131,7 +220,7 @@ impl Error for FilterError {}
 /// ```
 /// use backshift::{ArimaSpec, Filter};
 ///
-/// let spec = ArimaSpec { ar: &[0.6], d: 1, ma: &[0.3], mean: 0.0, sigma2: 1.0 };
+/// let spec = ArimaSpec { ar: &[0.6], d: 1, ma: &[0.3], ..ArimaSpec::default() };
 /// let mut filter = Filter::<4>::new(&spec).unwrap();
 /// assert!(filter.update(10.0).is_none()); // primes the differencing
 /// for y in [10.2, 10.1, 10.5] {
@@ -145,11 +234,13 @@ impl Error for FilterError {}
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub struct Filter<const R: usize> {
-    /// The ARMA state dimension, `1 <= r` and `r + d <= R`.
+    /// The ARMA state dimension, `1 <= r` and `r + k <= R`.
     r: usize,
-    /// The padded first column of the transition matrix.
+    /// The degree `k` of the differencing polynomial.
+    k: usize,
+    /// The padded first column of the transition matrix (the expanded AR polynomial).
     phi: [f64; R],
-    /// The padded selection vector `[1, theta_1, ...]`.
+    /// The padded selection vector `[1, theta_1, ...]` (the expanded MA polynomial).
     selection: [f64; R],
     /// The innovation variance.
     sigma2: f64,
@@ -157,13 +248,13 @@ pub struct Filter<const R: usize> {
     a: [f64; R],
     /// The predicted ARMA state covariance; the top-left `r x r` block is used.
     p: [[f64; R]; R],
-    /// The differencing order.
-    d: usize,
+    /// The differencing polynomial `delta_0 = 1, ..., delta_k`.
+    delta: [f64; R],
+    /// `lags[j]` is the raw value `j + 1` steps back, for `j < k`.
+    lags: [f64; R],
     /// The mean of the differenced series.
     mean: f64,
-    /// `levels[j]` is the last raw value differenced `j` times, for `j < d`.
-    levels: [f64; R],
-    /// How many raw values were fed, capped at `d + 1`. Values beyond `d` produce innovations.
+    /// How many raw values were fed, capped at `k + 1`. Values beyond `k` produce innovations.
     seen: usize,
 }
 
@@ -175,7 +266,7 @@ impl<const R: usize> Filter<R> {
     /// # Errors
     ///
     /// - [`FilterError::InvalidParameter`] if a coefficient or the mean is not finite,
-    ///   or `sigma2 <= 0`.
+    ///   `sigma2 <= 0`, or a non-empty seasonal part has period 0.
     /// - [`FilterError::Capacity`] if the model needs more than `R` states.
     /// - [`FilterError::NonStationary`] if the AR part is not stationary.
     pub fn new(spec: &ArimaSpec<'_>) -> Result<Self, FilterError> {
@@ -189,17 +280,18 @@ impl<const R: usize> Filter<R> {
 
         let mut filter = Self {
             r: spec.arma_states(),
+            k: spec.differencing_order(),
             phi: [0.0; R],
             selection: [0.0; R],
             sigma2: spec.sigma2,
             a: [0.0; R],
             p: [[0.0; R]; R],
-            d: spec.d,
+            delta: [0.0; R],
+            lags: [0.0; R],
             mean: spec.mean,
-            levels: [0.0; R],
             seen: 0,
         };
-        spec.pad_into(&mut filter.phi, &mut filter.selection);
+        spec.expand_into(&mut filter.phi, &mut filter.selection, &mut filter.delta);
 
         let (mut power, mut product, mut term) = ([[0.0; R]; R], [[0.0; R]; R], [[0.0; R]; R]);
         let scratch = LyapunovScratch {
@@ -218,10 +310,10 @@ impl<const R: usize> Filter<R> {
     /// Feeds one raw observation and returns the one-step prediction error of its
     /// differenced, demeaned value.
     ///
-    /// Returns [`None`] for the first `d` observations, which only prime the
+    /// Returns [`None`] for the first `k = d + D s` observations, which only prime the
     /// differencing. A `NaN` observation counts as missing, as in statsmodels: its
-    /// innovation value is `NaN` and the filter only moves forward in time. With
-    /// `d > 0` a missing value also makes the next `d` differences missing.
+    /// innovation value is `NaN` and the filter only moves forward in time. A missing
+    /// value also makes every difference that uses it missing.
     pub fn update(&mut self, y: f64) -> Option<Innovation> {
         let w = self.difference(y)? - self.mean;
 
@@ -244,8 +336,8 @@ impl<const R: usize> Filter<R> {
     /// Forecasts the next `mean.len()` raw values and their prediction variances.
     ///
     /// `mean[h]` and `variance[h]` describe the value `h + 1` steps ahead, on the
-    /// original (undifferenced) scale. Before `d` values were fed there is nothing
-    /// to integrate from, and both are filled with `NaN`.
+    /// original (undifferenced) scale. Before `k = d + D s` values were fed there is
+    /// nothing to integrate from, and both are filled with `NaN`.
     ///
     /// # Panics
     ///
@@ -256,7 +348,7 @@ impl<const R: usize> Filter<R> {
             variance.len(),
             "mean and variance must have the same length"
         );
-        if self.seen < self.d {
+        if self.seen < self.k {
             mean.fill(f64::NAN);
             variance.fill(f64::NAN);
             return;
@@ -281,7 +373,7 @@ impl<const R: usize> Filter<R> {
     /// ```
     /// use backshift::{ArimaSpec, Filter};
     ///
-    /// let spec = ArimaSpec { ar: &[0.5], d: 0, ma: &[], mean: 0.0, sigma2: 1.0 };
+    /// let spec = ArimaSpec { ar: &[0.5], ..ArimaSpec::default() };
     /// let filter = Filter::<2>::new(&spec).unwrap();
     /// let (mut mean, mut lower, mut upper) = ([0.0; 1], [0.0; 1], [0.0; 1]);
     /// filter.forecast_interval_into(0.95, &mut mean, &mut lower, &mut upper);
@@ -311,19 +403,20 @@ impl<const R: usize> Filter<R> {
         }
     }
 
-    /// Differences `y` through the stored levels and returns `(1 - B)^d y_t`, or [`None`]
-    /// while fewer than `d + 1` values were seen.
+    /// Applies the differencing polynomial to `y` and its stored lags, then stores `y`.
+    ///
+    /// Returns `sum_j delta_j y_(t-j)`, or [`None`] while fewer than `k + 1` values were seen.
     fn difference(&mut self, y: f64) -> Option<f64> {
-        let mut value = y;
-        for level in &mut self.levels[..self.d] {
-            let previous = *level;
-            *level = value;
-            value -= previous;
+        let k = self.k;
+        let value = polynomial::apply(&self.delta[..=k], y, self.lags[..k].iter().copied());
+        if k > 0 {
+            self.lags.copy_within(..k - 1, 1);
+            self.lags[0] = y;
         }
 
-        self.seen = (self.seen + 1).min(self.d + 1);
+        self.seen = (self.seen + 1).min(k + 1);
 
-        (self.seen > self.d).then_some(value)
+        (self.seen > k).then_some(value)
     }
 
     /// Splits the filter into its system matrices (trimmed to `r`), the state and the flat covariance.
@@ -338,30 +431,30 @@ impl<const R: usize> Filter<R> {
     }
 }
 
-/// The joint forecast of the ARMA state and the `d` integration levels.
+/// The joint forecast of the ARMA state and the last `k` raw values.
 ///
-/// The joint vector is `x = [a_0, ..., a_(r-1), L_0, ..., L_(d-1)]`, where `L_j` is the
-/// forecast of the raw series differenced `j` times, so `L_0` is the forecast itself.
-/// Each step moves the ARMA part forward, then integrates:
-/// `L_(d-1) += a_0 + mean`, then `L_j += L_(j+1)` for `j = d-2, ..., 0`. The past is
-/// known, so the levels start with zero variance; their covariance with the ARMA state
-/// then accumulates exactly, which gives the variance of the integrated forecast.
+/// The joint vector is `x = [a_0, ..., a_(r-1), y_t, y_(t-1), ..., y_(t-k+1)]`. Each step
+/// moves the ARMA part forward, then integrates: the next raw value is
+/// `y_(t+1) = a_0 + mean - sum_(j>=1) delta_j y_(t+1-j)`, which is pushed onto the lags.
+/// The past is known, so the lags start with zero variance; their covariance with the
+/// ARMA state then accumulates exactly, which gives the variance of the integrated
+/// forecast for any differencing polynomial.
 struct Forecast<'f, const R: usize> {
     /// The filter being forecast from.
     filter: &'f Filter<R>,
     /// The forecast mean of `x`.
     x: [f64; R],
-    /// The forecast covariance of `x`; the top-left `(r + d) x (r + d)` block is used.
+    /// The forecast covariance of `x`; the top-left `(r + k) x (r + k)` block is used.
     cov: [[f64; R]; R],
 }
 
 impl<'f, const R: usize> Forecast<'f, R> {
     /// The joint state right after the last observation.
     fn start(filter: &'f Filter<R>) -> Self {
-        let (r, d) = (filter.r, filter.d);
+        let (r, k) = (filter.r, filter.k);
         let mut x = [0.0; R];
         x[..r].copy_from_slice(&filter.a[..r]);
-        x[r..r + d].copy_from_slice(&filter.levels[..d]);
+        x[r..r + k].copy_from_slice(&filter.lags[..k]);
 
         let mut cov = [[0.0; R]; R];
         for (row, source) in cov.iter_mut().zip(&filter.p).take(r) {
@@ -373,17 +466,17 @@ impl<'f, const R: usize> Forecast<'f, R> {
 
     /// Writes one forecast per horizon into `mean` and `variance`.
     fn run(mut self, mean: &mut [f64], variance: &mut [f64]) {
-        let (r, d) = (self.filter.r, self.filter.d);
+        let (r, k) = (self.filter.r, self.filter.k);
         for (h, (m, v)) in mean.iter_mut().zip(variance.iter_mut()).enumerate() {
             if h > 0 {
                 self.step_arma();
             }
 
-            self.integrate();
-            if d == 0 {
+            if k == 0 {
                 *m = self.x[0] + self.filter.mean;
                 *v = self.cov[0][0];
             } else {
+                self.integrate();
                 *m = self.x[r];
                 *v = self.cov[r][r];
             }
@@ -391,9 +484,9 @@ impl<'f, const R: usize> Forecast<'f, R> {
     }
 
     /// Moves the ARMA part one step forward: its mean and covariance as in the filter,
-    /// and its covariance with the levels by `T`.
+    /// and its covariance with the lags by `T`.
     fn step_arma(&mut self) {
-        let (r, d) = (self.filter.r, self.filter.d);
+        let (r, k) = (self.filter.r, self.filter.k);
         let system = System {
             phi: &self.filter.phi[..r],
             selection: &self.filter.selection[..r],
@@ -409,43 +502,55 @@ impl<'f, const R: usize> Forecast<'f, R> {
             &mut scratch,
         );
 
-        for level in r..r + d {
+        for lag in r..r + k {
             for (value, row) in scratch.iter_mut().zip(&self.cov[..r]) {
-                *value = row[level];
+                *value = row[lag];
             }
 
             state_space::transition_vector(system, &mut scratch[..r]);
             for (i, &value) in scratch[..r].iter().enumerate() {
-                self.cov[i][level] = value;
-                self.cov[level][i] = value;
+                self.cov[i][lag] = value;
+                self.cov[lag][i] = value;
             }
         }
     }
 
-    /// Adds each level's new difference to it, from the deepest level outwards.
+    /// Pushes the next raw value onto the lags.
+    ///
+    /// As a linear map, the new `y` is `v . x` with `v = e_0 - sum_j delta_j e_(r+j-1)`,
+    /// and the older lags shift down by one. The covariance becomes `M cov M'`: rows first,
+    /// then columns.
     fn integrate(&mut self) {
-        let (r, d) = (self.filter.r, self.filter.d);
-        if d == 0 {
-            return;
+        let (r, k) = (self.filter.r, self.filter.k);
+        let n = r + k;
+        let delta = &self.filter.delta[1..=k];
+        let combine = |values: &dyn Fn(usize) -> f64| {
+            delta
+                .iter()
+                .enumerate()
+                .fold(values(0), |sum, (j, d)| sum - d * values(r + j))
+        };
+
+        let next = combine(&|i| self.x[i]) + self.filter.mean;
+        self.x.copy_within(r..n - 1, r + 1);
+        self.x[r] = next;
+
+        let mut row = [0.0; R];
+        for (c, value) in row.iter_mut().enumerate().take(n) {
+            *value = combine(&|i| self.cov[i][c]);
         }
 
-        self.x[r + d - 1] += self.x[0] + self.filter.mean;
-        self.add_covariance(r + d - 1, 0);
-        for j in (0..d - 1).rev() {
-            self.x[r + j] += self.x[r + j + 1];
-            self.add_covariance(r + j, r + j + 1);
-        }
-    }
+        self.cov.copy_within(r..n - 1, r + 1);
+        self.cov[r] = row;
 
-    /// Applies `x_k += x_m` to the covariance: row `k` += row `m`, then column `k` += column `m`.
-    fn add_covariance(&mut self, k: usize, m: usize) {
-        let n = self.filter.r + self.filter.d;
-        for j in 0..n {
-            self.cov[k][j] += self.cov[m][j];
+        let mut column = [0.0; R];
+        for (i, value) in column.iter_mut().enumerate().take(n) {
+            *value = combine(&|c| self.cov[i][c]);
         }
 
-        for row in &mut self.cov[..n] {
-            row[k] += row[m];
+        for (i, cov_row) in self.cov.iter_mut().enumerate().take(n) {
+            cov_row.copy_within(r..n - 1, r + 1);
+            cov_row[r] = column[i];
         }
     }
 }
@@ -468,6 +573,7 @@ mod tests {
             ma,
             mean,
             sigma2,
+            ..ArimaSpec::default()
         })
         .unwrap()
     }
@@ -533,10 +639,9 @@ mod tests {
         let new = |ar: &[f64], ma: &[f64], sigma2: f64| {
             Filter::<2>::new(&ArimaSpec {
                 ar,
-                d: 0,
                 ma,
-                mean: 0.0,
                 sigma2,
+                ..ArimaSpec::default()
             })
             .err()
         };
@@ -625,9 +730,7 @@ mod tests {
         let spec = ArimaSpec {
             ar: &[0.5],
             d: 2,
-            ma: &[],
-            mean: 0.0,
-            sigma2: 1.0,
+            ..ArimaSpec::default()
         };
         assert_eq!(spec.states(), 3);
         assert_eq!(

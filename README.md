@@ -5,7 +5,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/sunsided/arima-rs/ci.yml)](https://github.com/sunsided/arima-rs/actions/workflows/ci.yml)
 [![License](https://img.shields.io/crates/l/backshift)](#license)
 
-ARIMA models for Rust, fitted by exact maximum likelihood, with a streaming filter that runs on targets without a heap.
+Seasonal ARIMA models for Rust, fitted by exact maximum likelihood, with a streaming filter that runs on targets without a heap.
 A model is fitted wherever there is an allocator (a laptop, a server, statsmodels if you prefer), and its coefficients are
 all a microcontroller needs to filter new values and forecast them with prediction intervals. The name is the backshift
 operator `B` that ARIMA models are written in: `(1 - B)^d y_t` is the series differenced `d` times.
@@ -33,18 +33,18 @@ or in a Rust service that would rather not link BLAS. The streaming filter is th
 costs one Kalman step in `O(r²)` for `r = max(p, q + 1)` states, the innovation it returns doubles as an anomaly score
 (its variance comes with it), and the whole state lives inline in a `Copy` struct.
 
-If you need seasonal models, exogenous regressors or automatic order selection today, this crate doesn't have them yet.
-statsmodels and R's `forecast` package have all three; in Rust, [`foresight`](https://crates.io/crates/foresight) offers
-seasonal ARIMA and a stepwise auto-ARIMA, but does not build for bare-metal targets.
+If you need exogenous regressors or automatic order selection today, this crate doesn't have them yet. statsmodels and
+R's `forecast` package have both; in Rust, [`foresight`](https://crates.io/crates/foresight) offers a stepwise
+auto-ARIMA, but does not build for bare-metal targets.
 
 ## What's in it
 
-- `Arima::new(p, d, q).fit(y)`: exact Gaussian maximum likelihood with `sigma2` concentrated out, Hannan–Rissanen
+- `Arima::new(p, d, q).seasonal(P, D, Q, s).fit(y)`: exact Gaussian maximum likelihood with `sigma2` concentrated out, Hannan–Rissanen
   starting values and an in-crate BFGS; AR and MA parts stay stationary and invertible through statsmodels' PACF
   transforms. `Fitted` reports the log-likelihood, AIC, AICc and BIC.
-- `Filter<R>`: built from an `ArimaSpec` alone, it differences raw values in place, returns one-step innovations,
+- `Filter<R>`: built from an `ArimaSpec` alone, it expands the seasonal polynomials into its own arrays, differences raw values in place, returns one-step innovations,
   treats `NaN` as missing, and forecasts original-scale means, variances and intervals. `R` is the state capacity,
-  `max(p, q + 1) + d`.
+  `max(p + P s, q + Q s + 1) + d + D s`; the airline model ARIMA(0, 1, 1)(0, 1, 1, 12) needs `R = 27`.
 - `loglike` and `innovations` for any model size, through the same recursion as the filter.
 - The building blocks: `acov`, `acorr`, `pacf`, `difference`, `integrate`, `yule_walker`, `burg`, `hannan_rissanen`
   and `normal_quantile`.
@@ -97,8 +97,8 @@ Three conventions differ from statsmodels' defaults on purpose:
 
 ## Status
 
-Version 0.1 covers non-seasonal ARIMA(p, d, q) with an optional mean or drift. Seasonal models, exogenous regressors,
-diagnostics (Ljung–Box, KPSS) and automatic order selection are planned, roughly in that order; the
+The crate covers seasonal ARIMA(p, d, q)(P, D, Q, s) with an optional mean or drift. Exogenous regressors, diagnostics
+(Ljung–Box, KPSS) and automatic order selection are planned, roughly in that order; the
 [roadmap](https://github.com/sunsided/arima-rs/blob/main/docs/ROADMAP.md) has the details. The minimum supported Rust
 version is 1.85.
 

@@ -1,6 +1,6 @@
 //! Checks Hannan–Rissanen and maximum-likelihood fitting against statsmodels.
 
-use crate::arma_data::ALL;
+use crate::arma_data::{ALL, ArmaCase};
 use backshift::{Arima, difference, hannan_rissanen};
 
 /// Absolute tolerance on fitted coefficients and means, relative tolerance on `sigma2`.
@@ -12,6 +12,23 @@ const PARAMETER_TOLERANCE: f64 = 5e-4;
 
 /// How far below statsmodels' maximised log-likelihood ours may end up.
 const LOGLIKE_SLACK: f64 = 1e-6;
+
+/// The model a case was fitted with in statsmodels.
+fn model(case: &ArmaCase) -> Arima {
+    let model = Arima::new(case.ar.len(), case.d, case.ma.len());
+    let model = if case.period > 0 {
+        model.seasonal(
+            case.seasonal_ar.len(),
+            case.seasonal_d,
+            case.seasonal_ma.len(),
+            case.period,
+        )
+    } else {
+        model
+    };
+
+    model.mean(case.fit_with_mean)
+}
 
 #[test]
 fn hannan_rissanen_matches_statsmodels() {
@@ -39,8 +56,7 @@ fn hannan_rissanen_matches_statsmodels() {
 #[test]
 fn fit_reaches_the_statsmodels_maximum() {
     for (index, case) in ALL.iter().enumerate() {
-        let model = Arima::new(case.ar.len(), case.d, case.ma.len()).mean(case.fit_with_mean);
-        let fitted = model.fit(case.values).unwrap();
+        let fitted = model(case).fit(case.values).unwrap();
         let context = format!("case {index}: {fitted:?}");
 
         assert!(fitted.converged, "{context}");
@@ -55,7 +71,9 @@ fn fit_reaches_the_statsmodels_maximum() {
             .ar
             .iter()
             .zip(case.fit_ar)
-            .chain(fitted.ma.iter().zip(case.fit_ma));
+            .chain(fitted.ma.iter().zip(case.fit_ma))
+            .chain(fitted.seasonal_ar.iter().zip(case.fit_seasonal_ar))
+            .chain(fitted.seasonal_ma.iter().zip(case.fit_seasonal_ma));
         for (actual, expected) in pairs {
             assert!(
                 (actual - expected).abs() <= PARAMETER_TOLERANCE,
@@ -75,8 +93,7 @@ fn fit_reaches_the_statsmodels_maximum() {
 #[test]
 fn information_criteria_match_statsmodels() {
     for (index, case) in ALL.iter().enumerate() {
-        let model = Arima::new(case.ar.len(), case.d, case.ma.len()).mean(case.fit_with_mean);
-        let fitted = model.fit(case.values).unwrap();
+        let fitted = model(case).fit(case.values).unwrap();
 
         // Our llf sits up to about 1e-7 above statsmodels', so the criteria may differ by twice that.
         let close = |actual: f64, expected: f64| (actual - expected).abs() <= 1e-6;

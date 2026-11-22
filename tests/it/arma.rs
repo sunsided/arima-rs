@@ -1,14 +1,14 @@
 //! Checks the ARMA filter and likelihood against the statsmodels vectors in [`crate::arma_data`].
 
 use crate::arma_data::{ALL, ArmaCase, SPLIT};
-use backshift::{ArimaSpec, Filter, Innovation, innovations, loglike};
+use backshift::{ArimaSpec, Filter, Innovation, Seasonal, innovations, loglike};
 
 /// Relative tolerance against statsmodels.
 const TOLERANCE: f64 = 1e-9;
 
 /// The capacity used for the fixed-size filter: larger than every case's state dimension,
 /// so the stride differs from the runtime path's.
-const CAPACITY: usize = 8;
+const CAPACITY: usize = 32;
 
 /// Asserts that `actual` matches `expected` within [`TOLERANCE`], relative to `max(1, |expected|)`.
 /// Two `NaN`s match.
@@ -43,6 +43,12 @@ fn spec(case: &ArmaCase) -> ArimaSpec<'static> {
         ar: case.ar,
         d: case.d,
         ma: case.ma,
+        seasonal: Seasonal {
+            ar: case.seasonal_ar,
+            d: case.seasonal_d,
+            ma: case.seasonal_ma,
+            period: case.period,
+        },
         mean: case.mean,
         sigma2: case.sigma2,
     }
