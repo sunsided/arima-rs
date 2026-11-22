@@ -48,8 +48,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `FitError` gains `Degenerate`: a model that fits the series exactly (a constant series with a mean, a straight
   line with a drift) has zero innovation variance, and `Arima::fit` now returns this error instead of a model with
   `sigma2 = 0` and an infinite log-likelihood that `Filter::new` rejects.
-- A fit whose innovations are rounding noise (below 1e-12 of the data) returns `FitError::Degenerate` too, so an exact
-  fit is caught however the optimiser approaches it.
+- A fit whose innovation standard deviation is below 1e-9 of the range of the differenced data returns
+  `FitError::Degenerate` too, so an exact fit is caught however close the optimiser gets to it. A model without a mean and with `d = 0` can
+  still run towards a unit root on a constant series, because the likelihood is unbounded there; `refit` rejects a
+  constant window outright.
 - `Arima::fit` and `fit_exog` treat infinite values in `y` or the regressors as missing, as `NaN` already was.
 - `cov` returns `None` for two series with different estimators instead of using the first one's.
 - `AutoArima` reports the error of the simplest failed candidate when no candidate fits, instead of

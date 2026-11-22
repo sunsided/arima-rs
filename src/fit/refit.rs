@@ -115,7 +115,8 @@ impl ArimaSpec<'_> {
     ///   [`ArimaSpec::refit_exog`] then.
     /// - [`FitError::TooShort`] if the differenced window has fewer than
     ///   `p + q + P + Q + exog.len() + 2` non-missing values (one more with a mean).
-    /// - [`FitError::Degenerate`] if the model fits the window exactly.
+    /// - [`FitError::Degenerate`] if the differenced window is constant (a stuck sensor)
+    ///   or the model fits it exactly.
     pub fn refit<'o>(
         &self,
         window: &[f64],
@@ -172,6 +173,10 @@ impl ArimaSpec<'_> {
         let needed = model.parameter_count(columns) + 2;
         if present < needed {
             return Err(FitError::TooShort { needed, present });
+        }
+
+        if is_constant(dy) {
+            return Err(FitError::Degenerate);
         }
 
         let x = take(&mut scratch, model.parameter_count(columns));
@@ -279,6 +284,16 @@ impl ArimaSpec<'_> {
 
         rest.copy_from_slice(self.exog);
     }
+}
+
+/// Whether every present (non-`NaN`) value of `values` is the same, as from a stuck
+/// sensor. Such a window has no finite likelihood maximum: a model either fits it exactly
+/// or runs into a unit root, and neither is worth swapping in.
+fn is_constant(values: &[f64]) -> bool {
+    let mut present = values.iter().filter(|v| !v.is_nan());
+    present
+        .next()
+        .is_none_or(|&first| present.all(|&v| v == first))
 }
 
 /// [`FitError::BufferTooSmall`] unless a buffer of `got` values holds `needed`.
@@ -625,5 +640,69 @@ mod tests {
             spec.refit(&[5.0; 30], with_mean, &mut coefficients, &mut scratch),
             Err(FitError::Degenerate)
         );
+    }
+
+    #[test]
+    fn stuck_sensor_is_degenerate() {
+        // Without a mean and with d = 0, an AR(1) on a constant window would run into a
+        // unit root that `Filter::new` still accepts.
+        let mut window = [5.0; 30];
+        window[4] = f64::NAN;
+        for spec in [
+            ArimaSpec {
+                ar: &[0.5],
+                ..ArimaSpec::default()
+            },
+            ArimaSpec {
+                ma: &[0.3],
+                ..ArimaSpec::default()
+            },
+            ArimaSpec {
+                ar: &[0.5],
+                d: 1,
+                ..ArimaSpec::default()
+            },
+        ] {
+            let (_, result) = refit(&spec, &window, RefitOptions::default());
+            assert_eq!(result.unwrap_err(), FitError::Degenerate, "{spec:?}");
+        }
+    }
+
+    #[test]
+    fn exact_regression_hits_the_noise_floor() {
+        // y = 3 + 2 x exactly: the window varies, but from beta = 0 the optimiser runs
+        // towards the exact fit, where only rounding noise is left.
+        let x: Vec<f64> = (0..40).map(|t| f64::from((t * 7) % 11)).collect();
+        let y: Vec<f64> = x.iter().map(|x| 3.0 + 2.0 * x).collect();
+        let spec = ArimaSpec {
+            ar: &[0.2],
+            exog: &[0.0],
+            ..ArimaSpec::default()
+        };
+        let options = RefitOptions {
+            mean: true,
+            ..RefitOptions::default()
+        };
+        let mut coefficients = vec![0.0; spec.coefficient_len()];
+        let mut scratch = vec![0.0; spec.refit_scratch_len(y.len(), options)];
+        assert_eq!(
+            spec.refit_exog(&y, &x, options, &mut coefficients, &mut scratch),
+            Err(FitError::Degenerate)
+        );
+    }
+
+    #[test]
+    fn large_offset_is_not_degenerate() {
+        let window: Vec<f64> = arma(100, 0.5).iter().map(|v| 1e9 + 1e-4 * v).collect();
+        let spec = ArimaSpec {
+            ar: &[0.5],
+            ..ArimaSpec::default()
+        };
+        let options = RefitOptions {
+            mean: true,
+            ..RefitOptions::default()
+        };
+        let (_, result) = refit(&spec, &window, options);
+        result.unwrap();
     }
 }

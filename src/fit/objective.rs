@@ -115,12 +115,17 @@ impl<'a> Objective<'a> {
         concentrated(self.centered, &shape, steady, self.filter)
     }
 
-    /// The largest absolute non-missing differenced value: the scale of the data.
-    fn scale(&self) -> f64 {
-        self.dy
+    /// The range (largest minus smallest) of the non-missing differenced values: the
+    /// spread of the data, whatever its offset. Zero without any value.
+    fn range(&self) -> f64 {
+        let (low, high) = self
+            .dy
             .iter()
             .filter(|v| !v.is_nan())
-            .fold(0.0, |largest, v| largest.max(v.abs()))
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), &v| {
+                (low.min(v), high.max(v))
+            });
+        if high >= low { high - low } else { 0.0 }
     }
 
     /// The constrained parameters of the last [`Objective::evaluate`].
@@ -162,10 +167,12 @@ impl<'a> Objective<'a> {
     }
 }
 
-/// The innovation standard deviation, relative to the largest differenced value, below
-/// which a fit counts as exact: what is left is rounding noise, and the likelihood is
-/// unbounded there.
-const NOISE_FLOOR: f64 = 1e-12;
+/// The innovation standard deviation, relative to the range of the differenced values,
+/// below which a fit counts as exact: the model explains all but `1e-18` of the variance,
+/// the likelihood is unbounded there, and how close the optimiser gets depends only on
+/// when it stops. Relative to the range, an offset does not matter: `1e9` plus noise of
+/// standard deviation `1e-4` is far above it.
+const NOISE_FLOOR: f64 = 1e-9;
 
 /// What [`estimate`] found at the optimum, with `sigma2` concentrated out.
 pub(crate) struct Estimate {
@@ -190,7 +197,7 @@ pub(crate) struct Estimate {
 /// # Errors
 ///
 /// [`FitError::Degenerate`] if the likelihood cannot be evaluated at the optimum, or the
-/// innovations left there are rounding noise (below [`NOISE_FLOOR`] of the data).
+/// innovations left there are negligible (below [`NOISE_FLOOR`] of the data's range).
 pub(crate) fn estimate(
     objective: &mut Objective<'_>,
     x: &mut [f64],
@@ -212,7 +219,7 @@ pub(crate) fn estimate(
     );
 
     let (loglike, sigma2, nobs) = objective.evaluate(x, false).ok_or(FitError::Degenerate)?;
-    if math::sqrt(sigma2) <= NOISE_FLOOR * objective.scale() {
+    if math::sqrt(sigma2) <= NOISE_FLOOR * objective.range() {
         return Err(FitError::Degenerate);
     }
 

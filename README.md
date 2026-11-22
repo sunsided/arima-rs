@@ -66,7 +66,7 @@ The crate is `no_std`. With `default-features = false` pick one of the floating-
 | Features | For |
 |---|---|
 | `std` (default) | Everything, using the standard library's math functions. Implies `alloc`. |
-| `libm` | Bare-metal targets: `TimeSeries`, `acov`/`acorr`, `Filter`, the diagnostic tests and `normal_quantile`. No allocator needed. |
+| `libm` | Bare-metal targets: `TimeSeries`, `acov`/`acorr`, `Filter`, `ArimaSpec::refit`, the diagnostic tests and `normal_quantile`. No allocator needed. |
 | `libm`, `alloc` | Bare-metal targets with an allocator: adds fitting, `pacf`, differencing and the estimators. |
 | `rayon` | Fits the candidates of an exhaustive `AutoArima` search in parallel. Implies `std`. |
 
