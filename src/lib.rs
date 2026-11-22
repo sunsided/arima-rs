@@ -81,6 +81,8 @@ use core::borrow::Borrow;
 
 #[cfg(feature = "alloc")]
 mod autoregressive;
+#[cfg(feature = "alloc")]
+mod buffer;
 mod diagnostics;
 #[cfg(feature = "alloc")]
 mod difference;

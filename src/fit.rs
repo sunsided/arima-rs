@@ -18,6 +18,7 @@
 mod auto;
 mod bfgs;
 mod hannan_rissanen;
+mod objective;
 mod roots;
 mod transform;
 
@@ -26,12 +27,13 @@ pub use auto::{AutoArima, AutoFit, Criterion, nsdiffs};
 pub use hannan_rissanen::{ArmaCoefficients, hannan_rissanen};
 
 use crate::filter::{ArimaSpec, Seasonal};
-use crate::likelihood::{concentrated, differenced};
+use crate::likelihood::differenced;
 use crate::math;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::error::Error;
 use core::fmt::{Display, Formatter};
+use objective::Objective;
 
 /// A seasonal ARIMA(p, d, q)(P, D, Q, s) model to fit.
 ///
@@ -67,22 +69,6 @@ pub struct Arima {
     period: usize,
     /// Whether to estimate the mean of the differenced series.
     mean: bool,
-}
-
-/// Constrained parameters, in the order the optimiser stores them unconstrained.
-struct Parameters {
-    /// The AR coefficients.
-    ar: Vec<f64>,
-    /// The MA coefficients.
-    ma: Vec<f64>,
-    /// The seasonal AR coefficients.
-    seasonal_ar: Vec<f64>,
-    /// The seasonal MA coefficients.
-    seasonal_ma: Vec<f64>,
-    /// The mean of the differenced series, or 0.
-    mean: f64,
-    /// The regression coefficients.
-    exog: Vec<f64>,
 }
 
 impl Arima {
@@ -175,59 +161,54 @@ impl Arima {
             });
         }
 
-        let shape = self.shape(&[], &[], &[], &[]);
-        let dy = differenced(&missing_if_infinite(y), &shape);
-        let dx: Vec<Vec<f64>> = (0..columns)
-            .map(|j| {
+        let differencing = self.differencing();
+        let dy = differenced(&missing_if_infinite(y), &differencing);
+        let dx: Vec<f64> = (0..columns)
+            .flat_map(|j| {
                 let column: Vec<f64> = (0..y.len()).map(|t| regressors[t * columns + j]).collect();
-                differenced(&missing_if_infinite(&column), &shape)
+                differenced(&missing_if_infinite(&column), &differencing)
             })
             .collect();
-        let residual = |beta: &[f64], mean: f64| -> Vec<f64> {
-            (0..dy.len())
-                .map(|t| dy[t] - dx.iter().zip(beta).map(|(x, b)| x[t] * b).sum::<f64>() - mean)
-                .collect()
-        };
 
         let present = (0..dy.len())
-            .filter(|&t| !residual_is_missing(&dy, &dx, t))
+            .filter(|&t| !residual_is_missing(&dy, &dx, columns, t))
             .count();
         let needed = self.coefficients() + columns + usize::from(self.mean) + 2;
         if present < needed {
             return Err(FitError::TooShort { needed, present });
         }
 
-        let beta_start = self.least_squares_start(&dy, &dx);
-        let start = self.start(&residual(&beta_start, 0.0), &beta_start);
-        let evaluate = |parameters: &Parameters, steady: bool| {
-            let centered = residual(&parameters.exog, parameters.mean);
-            let shape = self.shape(
-                &parameters.ar,
-                &parameters.ma,
-                &parameters.seasonal_ar,
-                &parameters.seasonal_ma,
-            );
-            concentrated(&centered, &shape, steady)
-        };
-        let objective = |u: &[f64]| match evaluate(&self.constrain(u), true) {
-            Some((llf, _, n)) => -llf / n as f64,
-            None => f64::INFINITY,
-        };
-        let minimum = bfgs::minimize(objective, start, bfgs::Options::default());
+        let beta_start = self.least_squares_start(&dy, &dx, columns);
+        let mut residual = vec![0.0; dy.len()];
+        objective::residual_into(&dy, &dx, columns, &beta_start, 0.0, &mut residual);
+        let mut x = self.start(&residual, &beta_start);
+
+        let mut scratch = vec![0.0; Objective::scratch_len(self, dy.len(), columns)];
+        let mut objective = Objective::new(self, &dy, &dx, columns, &mut scratch);
+        let mut bfgs_scratch = vec![0.0; bfgs::scratch_len(x.len())];
+        let minimum = bfgs::minimize(
+            |u| match objective.evaluate(u, true) {
+                Some((llf, _, n)) => -llf / n as f64,
+                None => f64::INFINITY,
+            },
+            &mut x,
+            &mut bfgs_scratch,
+            bfgs::Options::default(),
+        );
 
         // The objective takes the steady-state shortcut; the reported values do not.
-        let parameters = self.constrain(&minimum.x);
-        let (loglike, sigma2, nobs) = evaluate(&parameters, false).ok_or(FitError::Degenerate)?;
+        let (loglike, sigma2, nobs) = objective.evaluate(&x, false).ok_or(FitError::Degenerate)?;
+        let parameters = objective.parameters();
 
         Ok(Fitted {
-            ar: parameters.ar,
+            ar: parameters.ar.to_vec(),
             d: self.d,
-            ma: parameters.ma,
-            seasonal_ar: parameters.seasonal_ar,
+            ma: parameters.ma.to_vec(),
+            seasonal_ar: parameters.seasonal_ar.to_vec(),
             seasonal_d: self.seasonal_d,
-            seasonal_ma: parameters.seasonal_ma,
+            seasonal_ma: parameters.seasonal_ma.to_vec(),
             period: self.period,
-            exog: parameters.exog,
+            exog: parameters.exog.to_vec(),
             with_mean: self.mean,
             mean: parameters.mean,
             sigma2,
@@ -240,20 +221,20 @@ impl Arima {
 
     /// Least-squares regression coefficients of the differenced `dy` on the differenced
     /// regressors `dx`, with an intercept when the mean is estimated. Zeros if the
-    /// regression fails (too few complete rows or collinear regressors).
-    fn least_squares_start(&self, dy: &[f64], dx: &[Vec<f64>]) -> Vec<f64> {
-        let columns = dx.len();
+    /// regression fails (too few complete rows or collinear regressors). `dx` is
+    /// column-major with `columns` columns.
+    fn least_squares_start(&self, dy: &[f64], dx: &[f64], columns: usize) -> Vec<f64> {
         if columns == 0 {
             return Vec::new();
         }
 
         let complete: Vec<usize> = (0..dy.len())
-            .filter(|&t| !residual_is_missing(dy, dx, t))
+            .filter(|&t| !residual_is_missing(dy, dx, columns, t))
             .collect();
         let rows: Vec<Vec<f64>> = complete
             .iter()
             .map(|&t| {
-                let mut row: Vec<f64> = dx.iter().map(|x| x[t]).collect();
+                let mut row: Vec<f64> = (0..columns).map(|j| dx[j * dy.len() + t]).collect();
                 if self.mean {
                     row.push(1.0);
                 }
@@ -275,23 +256,27 @@ impl Arima {
         self.p + self.q + self.seasonal_p + self.seasonal_q
     }
 
-    /// A spec with this model's orders and the given coefficients, zero mean and unit variance.
-    fn shape<'a>(
-        &self,
-        ar: &'a [f64],
-        ma: &'a [f64],
-        seasonal_ar: &'a [f64],
-        seasonal_ma: &'a [f64],
-    ) -> ArimaSpec<'a> {
+    /// The number of optimised parameters with `columns` regressors: the coefficients,
+    /// the mean if estimated, and `beta`.
+    fn parameter_count(&self, columns: usize) -> usize {
+        self.coefficients() + usize::from(self.mean) + columns
+    }
+
+    /// The state dimension of the expanded ARMA part, `max(p + P s, q + Q s + 1)`.
+    fn arma_states(&self) -> usize {
+        let ar = self.p + self.seasonal_p * self.period;
+        let ma = self.q + self.seasonal_q * self.period;
+        ar.max(ma + 1)
+    }
+
+    /// A spec with this model's differencing orders and no coefficients.
+    fn differencing(&self) -> ArimaSpec<'static> {
         ArimaSpec {
-            ar,
             d: self.d,
-            ma,
             seasonal: Seasonal {
-                ar: seasonal_ar,
                 d: self.seasonal_d,
-                ma: seasonal_ma,
                 period: self.period,
+                ..Seasonal::NONE
             },
             ..ArimaSpec::default()
         }
@@ -328,27 +313,6 @@ impl Arima {
         start.extend_from_slice(beta);
         start
     }
-
-    /// Maps unconstrained parameters to constrained ones.
-    ///
-    /// AR parts are negated after the transform and MA parts are not, as in statsmodels
-    /// SARIMAX, so that both come out stationary or invertible.
-    fn constrain(&self, u: &[f64]) -> Parameters {
-        let (ar, rest) = u.split_at(self.p);
-        let (ma, rest) = rest.split_at(self.q);
-        let (seasonal_ar, rest) = rest.split_at(self.seasonal_p);
-        let (seasonal_ma, rest) = rest.split_at(self.seasonal_q);
-        let negated = |x: &[f64]| transform::constrain(x).iter().map(|y| -y).collect();
-
-        Parameters {
-            ar: negated(ar),
-            ma: transform::constrain(ma),
-            seasonal_ar: negated(seasonal_ar),
-            seasonal_ma: transform::constrain(seasonal_ma),
-            mean: if self.mean { rest[0] } else { 0.0 },
-            exog: rest[usize::from(self.mean)..].to_vec(),
-        }
-    }
 }
 
 /// `values` with every infinite entry replaced by `NaN`, so the fit treats it as missing,
@@ -360,9 +324,10 @@ fn missing_if_infinite(values: &[f64]) -> Vec<f64> {
         .collect()
 }
 
-/// Whether observation `t` of the differenced data has a missing value.
-fn residual_is_missing(dy: &[f64], dx: &[Vec<f64>], t: usize) -> bool {
-    dy[t].is_nan() || dx.iter().any(|x| x[t].is_nan())
+/// Whether observation `t` of the differenced data has a missing value; `dx` is
+/// column-major with `columns` columns.
+fn residual_is_missing(dy: &[f64], dx: &[f64], columns: usize, t: usize) -> bool {
+    dy[t].is_nan() || (0..columns).any(|j| dx[j * dy.len() + t].is_nan())
 }
 
 /// A fitted seasonal ARIMA model.

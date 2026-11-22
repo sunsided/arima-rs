@@ -170,11 +170,11 @@ impl ArimaSpec<'_> {
         Ok(())
     }
 
-    /// Expands the model into the first column of `T`, the selection vector and the
-    /// differencing polynomial: `phi[..r]`, `selection[..r]` and `delta[..=k]`.
+    /// Expands the ARMA part into the first column of `T` and the selection vector:
+    /// `phi[..r]` and `selection[..r]`.
     ///
-    /// Requires `phi` and `selection` to hold `r = arma_states()` values and `delta` `k + 1`.
-    pub(crate) fn expand_into(&self, phi: &mut [f64], selection: &mut [f64], delta: &mut [f64]) {
+    /// Requires `phi` and `selection` to hold `r = arma_states()` values.
+    pub(crate) fn expand_arma_into(&self, phi: &mut [f64], selection: &mut [f64]) {
         let r = self.arma_states();
         let s = self.seasonal.period;
         phi[..r].fill(0.0);
@@ -183,7 +183,6 @@ impl ArimaSpec<'_> {
         polynomial::seasonal_product(self.ar, self.seasonal.ar, s, -1.0, phi);
         selection[0] = 1.0;
         polynomial::seasonal_product(self.ma, self.seasonal.ma, s, 1.0, &mut selection[1..]);
-        polynomial::differencing(self.d, self.seasonal.d, s, delta);
     }
 }
 
@@ -331,7 +330,13 @@ impl<const R: usize> Filter<R> {
             m: spec.exog.len(),
         };
         filter.beta[..filter.m].copy_from_slice(spec.exog);
-        spec.expand_into(&mut filter.phi, &mut filter.selection, &mut filter.delta);
+        spec.expand_arma_into(&mut filter.phi, &mut filter.selection);
+        polynomial::differencing(
+            spec.d,
+            spec.seasonal.d,
+            spec.seasonal.period,
+            &mut filter.delta,
+        );
 
         let (mut power, mut product, mut term) = ([[0.0; R]; R], [[0.0; R]; R], [[0.0; R]; R]);
         let scratch = LyapunovScratch {
