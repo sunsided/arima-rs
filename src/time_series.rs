@@ -1,8 +1,8 @@
-use crate::Estimator;
-use std::cell::Cell;
-use std::error::Error;
-use std::fmt::{Display, Formatter};
-use std::ops::Deref;
+use crate::{math, Estimator};
+use core::cell::Cell;
+use core::error::Error;
+use core::fmt::{Display, Formatter};
+use core::ops::Deref;
 
 #[derive(Debug, Clone)]
 pub struct TimeSeries<'a> {
@@ -56,7 +56,7 @@ impl<'a> TimeSeries<'a> {
     /// This forces calculation of mean and variance if
     /// not already available from previous calculations in order to assure
     /// that these statistics remain the same regardless of the slice.
-    pub fn slice_stationary<R: std::slice::SliceIndex<[f64], Output = [f64]>>(
+    pub fn slice_stationary<R: core::slice::SliceIndex<[f64], Output = [f64]>>(
         &self,
         range: R,
     ) -> Result<TimeSeries<'a>, TimeSeriesError> {
@@ -106,7 +106,7 @@ impl<'a> TimeSeries<'a> {
 
     /// Calculates the standard deviation.
     pub fn std(&self) -> f64 {
-        self.var().sqrt()
+        math::sqrt(self.var())
     }
 
     /// Calculates the residuals, i.e. the deviations from the mean.
@@ -144,7 +144,7 @@ pub enum TimeSeriesError {
 }
 
 impl Display for TimeSeriesError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         match self {
             TimeSeriesError::NotEnoughData => write!(f, "Not enough data"),
         }

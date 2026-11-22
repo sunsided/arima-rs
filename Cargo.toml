@@ -2,6 +2,18 @@
 name = "arima"
 version = "0.1.0"
 edition = "2021"
+# `core::error::Error` is stable since 1.81.
+rust-version = "1.81"
+
+[features]
+default = ["std"]
+# Use the standard library's floating-point functions.
+std = []
+# Use the pure-Rust `libm` crate on `no_std` targets.
+libm = ["dep:libm"]
+
+[dependencies]
+libm = { version = "0.2.16", optional = true }
 
 [dev-dependencies]
 float-cmp = "0.9.0"

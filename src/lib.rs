@@ -1,6 +1,24 @@
-pub use crate::time_series::{TimeSeries, TimeSeriesError};
-use std::borrow::Borrow;
+//! Time-series statistics for ARIMA modelling.
+//!
+//! The crate is `no_std` and needs only `alloc`. Enable exactly one of the
+//! `std` (default) or `libm` features to provide the floating-point functions.
 
+#![no_std]
+#![forbid(unsafe_code)]
+
+#[cfg(not(any(feature = "std", feature = "libm")))]
+compile_error!("enable the `std` feature or, for `no_std` targets, the `libm` feature");
+
+extern crate alloc;
+
+#[cfg(any(feature = "std", test))]
+extern crate std;
+
+pub use crate::time_series::{TimeSeries, TimeSeriesError};
+use alloc::vec::Vec;
+use core::borrow::Borrow;
+
+mod math;
 mod time_series;
 
 /// Defines the estimator to use.
@@ -167,7 +185,7 @@ fn durbin_levinson(acf: &[f64]) -> Vec<f64> {
         curr.clear();
         curr.extend((1..k).map(|j| prev[j - 1] - phi_kk * prev[k - j - 1]));
         curr.push(phi_kk);
-        std::mem::swap(&mut prev, &mut curr);
+        core::mem::swap(&mut prev, &mut curr);
 
         result.push(phi_kk);
     }
