@@ -70,12 +70,14 @@ fn main() {
         with.exog[1]
     );
 
-    // The filter is sized at compile time: 15 states for the model, 2 regressors.
+    // The filter is sized at compile time by `spec.capacity()`: 15 states, and the 2 regression
+    // coefficients fit within the same capacity.
     let spec = with.spec();
-    let mut filter = Filter::<16>::new(&spec).expect("the fitted model is stationary");
+    assert_eq!(spec.capacity(), 15);
+    let mut filter = Filter::<15>::new(&spec).expect("the fitted model is stationary");
     filter.warm_up_exog(&users, &regressors);
 
-    let mut plain = Filter::<16>::new(&without.spec()).expect("the fitted model is stationary");
+    let mut plain = Filter::<15>::new(&without.spec()).expect("the fitted model is stationary");
     plain.warm_up(&users);
 
     let future = future_regressors();
