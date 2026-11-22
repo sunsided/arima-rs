@@ -44,7 +44,8 @@ auto-ARIMA, but does not build for bare-metal targets.
   transforms. `Fitted` reports the log-likelihood, AIC, AICc and BIC.
 - `Filter<R>`: built from an `ArimaSpec` alone, it expands the seasonal polynomials into its own arrays, differences raw values in place, returns one-step innovations,
   treats `NaN` as missing, and forecasts original-scale means, variances and intervals. `R` is the state capacity,
-  `max(p + P s, q + Q s + 1) + d + D s`; the airline model ARIMA(0, 1, 1)(0, 1, 1, 12) needs `R = 27`.
+  `ArimaSpec::capacity()`, i.e. `max(p + P s, q + Q s + 1) + d + D s` or the number of regressors if that is
+  larger; the airline model ARIMA(0, 1, 1)(0, 1, 1, 12) needs `R = 27`.
 - Regression with ARIMA errors: `fit_exog`, `update_exog`, `forecast_exog_into` and friends model `y_t - x_t . beta`
   with the regressors differenced along with `y`, as R's `arima(xreg=)` does.
 - `loglike` and `innovations` (and their `_exog` forms) for any model size, through the same recursion as the filter.

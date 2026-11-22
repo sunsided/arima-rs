@@ -430,6 +430,10 @@ impl Fitted {
 
     /// The fitted model as a spec, for [`Filter::new`](crate::Filter::new),
     /// [`loglike`](crate::loglike) and [`innovations`](crate::innovations).
+    ///
+    /// After [`Arima::fit_exog`] the spec carries the regression coefficients, so use
+    /// [`loglike_exog`](crate::loglike_exog) and [`innovations_exog`](crate::innovations_exog)
+    /// with the original regressors instead; the plain forms panic for it.
     #[must_use]
     pub fn spec(&self) -> ArimaSpec<'_> {
         ArimaSpec {

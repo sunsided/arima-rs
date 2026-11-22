@@ -117,11 +117,19 @@ impl Default for ArimaSpec<'_> {
 }
 
 impl ArimaSpec<'_> {
-    /// The smallest capacity `R` a [`Filter`] needs for this model:
-    /// `max(p + P s, q + Q s + 1) + d + D s`.
+    /// The number of states the model needs: `max(p + P s, q + Q s + 1) + d + D s`.
+    ///
+    /// Size a [`Filter`] with [`ArimaSpec::capacity`], which also counts the regressors.
     #[must_use]
     pub fn states(&self) -> usize {
         self.arma_states() + self.differencing_order()
+    }
+
+    /// The smallest capacity `R` a [`Filter`] needs for this model:
+    /// `max(states(), exog.len())`.
+    #[must_use]
+    pub fn capacity(&self) -> usize {
+        self.states().max(self.exog.len())
     }
 
     /// The state dimension of the expanded ARMA part, `max(p + P s, q + Q s + 1)`.
@@ -227,7 +235,7 @@ impl Error for FilterError {}
 
 /// A streaming ARIMA filter with room for `R` states, stored inline with no heap.
 ///
-/// `R` must be at least [`ArimaSpec::states`]. Its size is about `8 (R² + 6R)` bytes.
+/// `R` must be at least [`ArimaSpec::capacity`]. Its size is about `8 (R² + 6R)` bytes.
 /// [`Filter::new`] uses about three times that on the stack while it computes the
 /// starting covariance, and [`Filter::forecast_into`] about twice. The filter is
 /// `Copy`, so it can be snapshotted cheaply.
@@ -289,6 +297,7 @@ impl<const R: usize> Filter<R> {
     /// - [`FilterError::InvalidParameter`] if a coefficient or the mean is not finite,
     ///   `sigma2 <= 0`, or a non-empty seasonal part has period 0.
     /// - [`FilterError::Capacity`] if the model needs more than `R` states.
+    /// - [`FilterError::Regressors`] if the model has more than `R` regression coefficients.
     /// - [`FilterError::NonStationary`] if the AR part is not stationary.
     pub fn new(spec: &ArimaSpec<'_>) -> Result<Self, FilterError> {
         spec.validate()?;
@@ -848,6 +857,7 @@ mod tests {
             ..ArimaSpec::default()
         };
         assert_eq!(spec.states(), 3);
+        assert_eq!(spec.capacity(), 3);
         assert_eq!(
             Filter::<2>::new(&spec).err(),
             Some(FilterError::Capacity {
@@ -907,6 +917,7 @@ mod tests {
             exog: &[1.0, 2.0, 3.0],
             ..ArimaSpec::default()
         };
+        assert_eq!((spec.states(), spec.capacity()), (1, 3));
         assert_eq!(
             Filter::<2>::new(&spec).err(),
             Some(FilterError::Regressors {

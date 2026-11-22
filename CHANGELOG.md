@@ -13,6 +13,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Regression with ARIMA errors: `ArimaSpec::exog`, `Arima::fit_exog`, `Filter::update_exog`, `warm_up_exog`,
   `forecast_exog_into` and `forecast_interval_exog_into`, `innovations_exog` and `loglike_exog`. Fitted models
   report `exog`; `FilterError::Regressors` and `FitError::RegressorShape` are new.
+- `ArimaSpec::capacity()`: the smallest `R` a `Filter` needs, regressors included.
 
 ### Changed
 
