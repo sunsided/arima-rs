@@ -22,7 +22,13 @@ pub extern "C" fn _start() -> ! {
     let r = series.ok().and_then(|s| backshift::acorr(&s, 1));
     core::hint::black_box(r);
 
-    let spec = backshift::ArmaSpec { ar: &[0.5], ma: &[0.3], sigma2: 1.0 };
+    let spec = backshift::ArimaSpec {
+        ar: &[0.5],
+        d: 1,
+        ma: &[0.3],
+        mean: 0.0,
+        sigma2: 1.0,
+    };
     if let Ok(mut filter) = backshift::Filter::<4>::new(&spec) {
         filter.warm_up(&x);
         let innovation = filter.update(core::hint::black_box(2.5));

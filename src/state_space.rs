@@ -65,12 +65,7 @@ pub(crate) fn predict(
     row0: &mut [f64],
 ) {
     let r = sys.dim();
-
-    let a0 = a[0];
-    for i in 0..r {
-        let next = if i + 1 < r { a[i + 1] } else { 0.0 };
-        a[i] = sys.phi[i] * a0 + next;
-    }
+    transition_vector(sys, a);
 
     // Row 0 of the old P; by symmetry it is also column 0.
     row0[..r].copy_from_slice(&p[..r]);
@@ -93,6 +88,16 @@ pub(crate) fn predict(
     }
 
     mirror_upper(p, r, stride);
+}
+
+/// Multiplies the state vector by the transition matrix in place: `a = T a`.
+pub(crate) fn transition_vector(sys: System<'_>, a: &mut [f64]) {
+    let r = sys.dim();
+    let a0 = a[0];
+    for i in 0..r {
+        let next = if i + 1 < r { a[i + 1] } else { 0.0 };
+        a[i] = sys.phi[i] * a0 + next;
+    }
 }
 
 /// Conditions the state on the observation `y` and returns its innovation.

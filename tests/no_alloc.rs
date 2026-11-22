@@ -5,7 +5,7 @@
 //! the count did not move. It runs without the libtest harness
 //! (`harness = false`), so no harness thread allocates while it measures.
 
-use backshift::{ArmaSpec, Filter};
+use backshift::{ArimaSpec, Filter};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -39,9 +39,11 @@ fn main() {
     let mut variance = [0.0; 6];
     let before = ALLOCATIONS.load(Ordering::SeqCst);
 
-    let spec = ArmaSpec {
+    let spec = ArimaSpec {
         ar: &[0.5, -0.2],
+        d: 1,
         ma: &[0.4],
+        mean: 0.1,
         sigma2: 1.3,
     };
     let mut filter = Filter::<4>::new(&spec).expect("stationary model");

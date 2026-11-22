@@ -1,7 +1,7 @@
 //! Checks the ARMA filter and likelihood against the statsmodels vectors in [`crate::arma_data`].
 
 use crate::arma_data::{ALL, ArmaCase, SPLIT};
-use backshift::{ArmaSpec, Filter, Innovation, innovations, loglike};
+use backshift::{ArimaSpec, Filter, Innovation, innovations, loglike};
 
 /// Relative tolerance against statsmodels.
 const TOLERANCE: f64 = 1e-9;
@@ -38,10 +38,12 @@ fn assert_innovations(what: &str, actual: &[Innovation], values: &[f64], varianc
 }
 
 /// The model of a case.
-fn spec(case: &ArmaCase) -> ArmaSpec<'static> {
-    ArmaSpec {
+fn spec(case: &ArmaCase) -> ArimaSpec<'static> {
+    ArimaSpec {
         ar: case.ar,
+        d: case.d,
         ma: case.ma,
+        mean: case.mean,
         sigma2: case.sigma2,
     }
 }
@@ -81,8 +83,17 @@ fn fixed_filter_equals_runtime_path_bit_for_bit() {
     for case in ALL {
         let runtime = innovations(case.values, &spec(case)).unwrap();
         let mut fixed = filter(case);
-        for (t, (&y, expected)) in case.values.iter().zip(&runtime).enumerate() {
-            let actual = fixed.update(y);
+        let streamed: Vec<Innovation> = case
+            .values
+            .iter()
+            .filter_map(|&y| fixed.update(y))
+            .collect();
+        assert_eq!(
+            streamed.len(),
+            runtime.len(),
+            "the first d values give no innovation"
+        );
+        for (t, (actual, expected)) in streamed.iter().zip(&runtime).enumerate() {
             assert_eq!(
                 actual.value.to_bits(),
                 expected.value.to_bits(),
@@ -104,7 +115,11 @@ fn streaming_matches_statsmodels_extend() {
         streaming.warm_up(&case.values[..SPLIT]);
         let tail: Vec<Innovation> = case.values[SPLIT..]
             .iter()
-            .map(|&y| streaming.update(y))
+            .map(|&y| {
+                streaming
+                    .update(y)
+                    .expect("SPLIT > d, so differencing is primed")
+            })
             .collect();
         assert_innovations("extend", &tail, case.extend_values, case.extend_variances);
     }
