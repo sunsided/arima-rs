@@ -141,7 +141,7 @@ impl ArimaSpec<'_> {
     }
 
     /// The degree of the differencing polynomial, `d + D s`.
-    pub(crate) fn differencing_order(&self) -> usize {
+    pub(crate) const fn differencing_order(&self) -> usize {
         self.d + self.seasonal.d * self.seasonal.period
     }
 

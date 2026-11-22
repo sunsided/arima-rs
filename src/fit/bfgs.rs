@@ -21,10 +21,15 @@ pub(crate) struct Options {
     pub(crate) value_tolerance: f64,
 }
 
+impl Options {
+    /// The default iteration limit.
+    pub(crate) const DEFAULT_MAX_ITERATIONS: usize = 200;
+}
+
 impl Default for Options {
     fn default() -> Self {
         Self {
-            max_iterations: 200,
+            max_iterations: Self::DEFAULT_MAX_ITERATIONS,
             gradient_tolerance: 1e-7,
             value_tolerance: 1e-13,
         }
@@ -310,10 +315,10 @@ fn max_abs(v: &[f64]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::vec;
+    use std::vec;
 
     /// Minimises `f` from `x0` with fresh scratch and returns the point and the result.
-    fn run(f: impl FnMut(&[f64]) -> f64, x0: &[f64]) -> (alloc::vec::Vec<f64>, Minimum) {
+    fn run(f: impl FnMut(&[f64]) -> f64, x0: &[f64]) -> (std::vec::Vec<f64>, Minimum) {
         let mut x = x0.to_vec();
         let mut scratch = vec![0.0; scratch_len(x.len())];
         let minimum = minimize(f, &mut x, &mut scratch, Options::default());

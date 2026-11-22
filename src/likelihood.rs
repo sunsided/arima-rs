@@ -6,9 +6,13 @@
 
 use crate::buffer::take;
 use crate::filter::{ArimaSpec, FilterError};
+use crate::math;
+#[cfg(feature = "alloc")]
+use crate::polynomial;
 use crate::state_space::{self, Innovation, LyapunovScratch, System};
-use crate::{math, polynomial};
+#[cfg(feature = "alloc")]
 use alloc::vec;
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
 /// Runs the filter over `diff(y, d) - mean` from the stationary start and returns
@@ -27,6 +31,7 @@ use alloc::vec::Vec;
 /// # Panics
 ///
 /// Panics if the model has regressors; use [`innovations_exog`] then.
+#[cfg(feature = "alloc")]
 pub fn innovations(y: &[f64], spec: &ArimaSpec<'_>) -> Result<Vec<Innovation>, FilterError> {
     innovations_exog(y, &[], spec)
 }
@@ -42,6 +47,7 @@ pub fn innovations(y: &[f64], spec: &ArimaSpec<'_>) -> Result<Vec<Innovation>, F
 /// # Panics
 ///
 /// Panics if `regressors` does not hold `y.len()` rows of `spec.exog.len()` values.
+#[cfg(feature = "alloc")]
 pub fn innovations_exog(
     y: &[f64],
     regressors: &[f64],
@@ -83,6 +89,7 @@ pub fn innovations_exog(
 /// let llf = loglike(&[0.0, 0.0], &spec).unwrap();
 /// assert!((llf + std::f64::consts::TAU.ln()).abs() < 1e-12);
 /// ```
+#[cfg(feature = "alloc")]
 pub fn loglike(y: &[f64], spec: &ArimaSpec<'_>) -> Result<f64, FilterError> {
     loglike_exog(y, &[], spec)
 }
@@ -96,6 +103,7 @@ pub fn loglike(y: &[f64], spec: &ArimaSpec<'_>) -> Result<f64, FilterError> {
 /// # Panics
 ///
 /// Panics if `regressors` does not hold `y.len()` rows of `spec.exog.len()` values.
+#[cfg(feature = "alloc")]
 pub fn loglike_exog(
     y: &[f64],
     regressors: &[f64],
@@ -176,6 +184,7 @@ pub(crate) fn concentrated(
 /// # Panics
 ///
 /// Panics if `regressors` does not hold `y.len()` rows of `beta.len()` values.
+#[cfg(feature = "alloc")]
 pub(crate) fn regressed(y: &[f64], regressors: &[f64], beta: &[f64]) -> Vec<f64> {
     let m = beta.len();
     assert_eq!(
@@ -193,6 +202,7 @@ pub(crate) fn regressed(y: &[f64], regressors: &[f64], beta: &[f64]) -> Vec<f64>
 }
 
 /// `(1 - B)^d (1 - B^s)^D y - mean`: the series the ARMA part models.
+#[cfg(feature = "alloc")]
 fn demeaned_difference(y: &[f64], spec: &ArimaSpec<'_>) -> Vec<f64> {
     let mut w = differenced(y, spec);
     for value in &mut w {
@@ -204,6 +214,7 @@ fn demeaned_difference(y: &[f64], spec: &ArimaSpec<'_>) -> Vec<f64> {
 
 /// `(1 - B)^d (1 - B^s)^D y`, through the same arithmetic as [`Filter`](crate::Filter):
 /// `y.len() - k` values for `k = d + D s`, or none if `y` is shorter.
+#[cfg(feature = "alloc")]
 pub(crate) fn differenced(y: &[f64], spec: &ArimaSpec<'_>) -> Vec<f64> {
     let k = spec.differencing_order();
     let mut delta = vec![0.0; k + 1];

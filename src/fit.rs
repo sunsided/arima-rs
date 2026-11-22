@@ -15,24 +15,36 @@
 //!     U2 -->|constrain| F["Fitted"]
 //! ```
 
+#[cfg(feature = "alloc")]
 mod auto;
 mod bfgs;
+#[cfg(feature = "alloc")]
 mod hannan_rissanen;
 mod objective;
+mod refit;
+#[cfg(feature = "alloc")]
 mod roots;
 mod transform;
 
+#[cfg(feature = "alloc")]
 pub use auto::{AutoArima, AutoFit, Criterion, nsdiffs};
-
+#[cfg(feature = "alloc")]
 pub use hannan_rissanen::{ArmaCoefficients, hannan_rissanen};
+pub use refit::{Refit, RefitOptions, Refitter};
 
+#[cfg(feature = "alloc")]
 use crate::filter::{ArimaSpec, Seasonal};
+#[cfg(feature = "alloc")]
 use crate::likelihood::differenced;
+#[cfg(feature = "alloc")]
 use crate::math;
+#[cfg(feature = "alloc")]
 use alloc::vec;
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 use core::error::Error;
 use core::fmt::{Display, Formatter};
+#[cfg(feature = "alloc")]
 use objective::Objective;
 
 /// A seasonal ARIMA(p, d, q)(P, D, Q, s) model to fit.
@@ -40,6 +52,8 @@ use objective::Objective;
 /// # Examples
 ///
 /// ```
+/// # #[cfg(feature = "alloc")]
+/// # fn main() {
 /// use backshift::Arima;
 ///
 /// let y = [0.3, 1.1, 0.4, -0.2, 0.9, 1.4, 0.6, 0.1, -0.5, 0.2, 0.8, 1.0, 0.3, -0.1, 0.4];
@@ -50,6 +64,9 @@ use objective::Objective;
 /// // ARIMA(1, 0, 0)(1, 0, 0, 4) on the same series.
 /// let seasonal = Arima::new(1, 0, 0).seasonal(1, 0, 0, 4).fit(&y).unwrap();
 /// assert_eq!(seasonal.seasonal_ar.len(), 1);
+/// # }
+/// # #[cfg(not(feature = "alloc"))]
+/// # fn main() {}
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Arima {
@@ -71,6 +88,27 @@ pub struct Arima {
     mean: bool,
 }
 
+impl Arima {
+    /// The number of AR and MA coefficients, seasonal ones included.
+    const fn coefficients(&self) -> usize {
+        self.p + self.q + self.seasonal_p + self.seasonal_q
+    }
+
+    /// The number of optimised parameters with `columns` regressors: the coefficients,
+    /// the mean if estimated, and `beta`.
+    const fn parameter_count(&self, columns: usize) -> usize {
+        self.coefficients() + self.mean as usize + columns
+    }
+
+    /// The state dimension of the expanded ARMA part, `max(p + P s, q + Q s + 1)`.
+    const fn arma_states(&self) -> usize {
+        let ar = self.p + self.seasonal_p * self.period;
+        let ma = self.q + self.seasonal_q * self.period;
+        if ar > ma { ar } else { ma + 1 }
+    }
+}
+
+#[cfg(feature = "alloc")]
 impl Arima {
     /// An ARIMA(`p`, `d`, `q`) model. It estimates a mean for `d = D = 0` and none
     /// otherwise, like statsmodels ARIMA and R's `arima`; change that with [`Arima::mean`].
@@ -186,18 +224,9 @@ impl Arima {
         let mut scratch = vec![0.0; Objective::scratch_len(self, dy.len(), columns)];
         let mut objective = Objective::new(self, &dy, &dx, columns, &mut scratch);
         let mut bfgs_scratch = vec![0.0; bfgs::scratch_len(x.len())];
-        let minimum = bfgs::minimize(
-            |u| match objective.evaluate(u, true) {
-                Some((llf, _, n)) => -llf / n as f64,
-                None => f64::INFINITY,
-            },
-            &mut x,
-            &mut bfgs_scratch,
-            bfgs::Options::default(),
-        );
-
-        // The objective takes the steady-state shortcut; the reported values do not.
-        let (loglike, sigma2, nobs) = objective.evaluate(&x, false).ok_or(FitError::Degenerate)?;
+        let max_iterations = bfgs::Options::default().max_iterations;
+        let estimate =
+            objective::estimate(&mut objective, &mut x, &mut bfgs_scratch, max_iterations)?;
         let parameters = objective.parameters();
 
         Ok(Fitted {
@@ -211,11 +240,11 @@ impl Arima {
             exog: parameters.exog.to_vec(),
             with_mean: self.mean,
             mean: parameters.mean,
-            sigma2,
-            loglike,
-            nobs,
-            iterations: minimum.iterations,
-            converged: minimum.converged,
+            sigma2: estimate.sigma2,
+            loglike: estimate.loglike,
+            nobs: estimate.nobs,
+            iterations: estimate.iterations,
+            converged: estimate.converged,
         })
     }
 
@@ -251,24 +280,6 @@ impl Arima {
             .unwrap_or_else(|| vec![0.0; columns])
     }
 
-    /// The number of AR and MA coefficients, seasonal ones included.
-    fn coefficients(&self) -> usize {
-        self.p + self.q + self.seasonal_p + self.seasonal_q
-    }
-
-    /// The number of optimised parameters with `columns` regressors: the coefficients,
-    /// the mean if estimated, and `beta`.
-    fn parameter_count(&self, columns: usize) -> usize {
-        self.coefficients() + usize::from(self.mean) + columns
-    }
-
-    /// The state dimension of the expanded ARMA part, `max(p + P s, q + Q s + 1)`.
-    fn arma_states(&self) -> usize {
-        let ar = self.p + self.seasonal_p * self.period;
-        let ma = self.q + self.seasonal_q * self.period;
-        ar.max(ma + 1)
-    }
-
     /// A spec with this model's differencing orders and no coefficients.
     fn differencing(&self) -> ArimaSpec<'static> {
         ArimaSpec {
@@ -295,17 +306,17 @@ impl Arima {
 
         let estimate = hannan_rissanen(&centered, self.p, self.q);
         let (ar, ma) = estimate.map_or((Vec::new(), Vec::new()), |s| (s.ar, s.ma));
-        let negated: Vec<f64> = ar.iter().map(|phi| -phi).collect();
-        let ar_start = transform::unconstrain(&negated)
-            .filter(|_| ar.len() == self.p)
-            .unwrap_or_else(|| vec![0.0; self.p]);
-        let ma_start = transform::unconstrain(&ma)
-            .filter(|_| ma.len() == self.q)
-            .unwrap_or_else(|| vec![0.0; self.q]);
+        let mut start = vec![0.0; self.coefficients()];
+        let mut work = vec![0.0; 3 * self.p.max(self.q)];
+        if ar.len() == self.p {
+            objective::unconstrain_part(&ar, true, &mut start[..self.p], &mut work);
+        }
 
-        let mut start = ar_start;
-        start.extend(ma_start);
-        start.extend(core::iter::repeat_n(0.0, self.seasonal_p + self.seasonal_q));
+        if ma.len() == self.q {
+            let ma_start = &mut start[self.p..self.p + self.q];
+            objective::unconstrain_part(&ma, false, ma_start, &mut work);
+        }
+
         if self.mean {
             start.push(mean);
         }
@@ -317,6 +328,7 @@ impl Arima {
 
 /// `values` with every infinite entry replaced by `NaN`, so the fit treats it as missing,
 /// as [`AutoArima`]'s differencing tests already do.
+#[cfg(feature = "alloc")]
 fn missing_if_infinite(values: &[f64]) -> Vec<f64> {
     values
         .iter()
@@ -326,11 +338,13 @@ fn missing_if_infinite(values: &[f64]) -> Vec<f64> {
 
 /// Whether observation `t` of the differenced data has a missing value; `dx` is
 /// column-major with `columns` columns.
+#[cfg(feature = "alloc")]
 fn residual_is_missing(dy: &[f64], dx: &[f64], columns: usize, t: usize) -> bool {
     dy[t].is_nan() || (0..columns).any(|j| dx[j * dy.len() + t].is_nan())
 }
 
 /// A fitted seasonal ARIMA model.
+#[cfg(feature = "alloc")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Fitted {
     /// The AR coefficients `phi_1, ..., phi_p`. Always stationary.
@@ -365,6 +379,7 @@ pub struct Fitted {
     pub converged: bool,
 }
 
+#[cfg(feature = "alloc")]
 impl Fitted {
     /// The number of estimated parameters: `p + q + P + Q`, the regression coefficients,
     /// one for the mean if estimated, and one for `sigma2`. This is the `k` of the
@@ -451,10 +466,17 @@ pub enum FitError {
         present: usize,
     },
     /// The likelihood has no finite maximum: the model explains the series exactly, so the
-    /// innovation variance is zero (a constant series with a mean, or a straight line with
-    /// a drift), or the values are so large (beyond about `1e154`) that the variance
-    /// overflows. From [`AutoArima`], also when every fitted candidate was rejected.
+    /// innovations are zero or rounding noise (a constant series with a mean, or a straight
+    /// line with a drift), or the values are so large (beyond about `1e154`) that the
+    /// variance overflows. From `AutoArima`, also when every fitted candidate was rejected.
     Degenerate,
+    /// A caller-provided buffer of a refit is too small.
+    BufferTooSmall {
+        /// The values the buffer must hold.
+        needed: usize,
+        /// The values it holds.
+        got: usize,
+    },
 }
 
 impl Display for FitError {
@@ -470,13 +492,16 @@ impl Display for FitError {
                 )
             }
             FitError::Degenerate => write!(f, "the series leaves no innovation variance"),
+            FitError::BufferTooSmall { needed, got } => {
+                write!(f, "buffer holds {got} values, needs {needed}")
+            }
         }
     }
 }
 
 impl Error for FitError {}
 
-#[cfg(test)]
+#[cfg(all(test, feature = "alloc"))]
 mod tests {
     use super::*;
 

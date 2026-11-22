@@ -6,10 +6,11 @@
 //! `u` to stationary and invertible coefficients, removes the regression and the mean from
 //! the differenced series, and filters the result. Nothing here allocates.
 
-use super::{Arima, transform};
+use super::{Arima, FitError, bfgs, transform};
 use crate::buffer::take;
 use crate::filter::{ArimaSpec, Seasonal};
 use crate::likelihood::{concentrated, workspace_len};
+use crate::math;
 
 /// Constrained parameters, borrowed from an [`Objective`]'s buffer.
 pub(crate) struct Parameters<'a> {
@@ -51,7 +52,7 @@ pub(crate) struct Objective<'a> {
 impl<'a> Objective<'a> {
     /// The scratch an objective for `model` needs, for `n` differenced values and
     /// `columns` regressors.
-    pub(crate) fn scratch_len(model: &Arima, n: usize, columns: usize) -> usize {
+    pub(crate) const fn scratch_len(model: &Arima, n: usize, columns: usize) -> usize {
         let parameters = model.parameter_count(columns);
         2 * parameters + n + workspace_len(model.arma_states())
     }
@@ -114,6 +115,21 @@ impl<'a> Objective<'a> {
         concentrated(self.centered, &shape, steady, self.filter)
     }
 
+    /// The range (largest minus smallest) of the non-missing differenced values: the
+    /// spread of the data, whatever its offset. Zero when they are all equal or none is
+    /// present; the floor then only rejects `sigma2 = 0`, and a constant series is left to
+    /// the callers (`refit` rejects it, `AutoArima` picks white noise for it).
+    fn range(&self) -> f64 {
+        let (low, high) = self
+            .dy
+            .iter()
+            .filter(|v| !v.is_nan())
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), &v| {
+                (low.min(v), high.max(v))
+            });
+        if high >= low { high - low } else { 0.0 }
+    }
+
     /// The constrained parameters of the last [`Objective::evaluate`].
     pub(crate) fn parameters(&self) -> Parameters<'_> {
         split(self.model, self.params)
@@ -150,6 +166,92 @@ impl<'a> Objective<'a> {
         }
 
         self.params[start..].copy_from_slice(&u[start..]);
+    }
+}
+
+/// The innovation standard deviation, relative to the range of the differenced values,
+/// below which a fit counts as exact: the model explains all but `1e-18` of the variance,
+/// the likelihood is unbounded there, and how close the optimiser gets depends only on
+/// when it stops. Relative to the range, an offset does not matter: `1e9` plus noise of
+/// standard deviation `1e-4` is far above it.
+const NOISE_FLOOR: f64 = 1e-9;
+
+/// What [`estimate`] found at the optimum, with `sigma2` concentrated out.
+pub(crate) struct Estimate {
+    /// The exact log-likelihood of the differenced series.
+    pub(crate) loglike: f64,
+    /// The innovation variance.
+    pub(crate) sigma2: f64,
+    /// The number of non-missing values the likelihood covers.
+    pub(crate) nobs: usize,
+    /// The optimiser iterations taken.
+    pub(crate) iterations: usize,
+    /// Whether the optimiser met its tolerance rather than its iteration limit.
+    pub(crate) converged: bool,
+}
+
+/// Maximises the likelihood of `objective` from the unconstrained start `x`, which is
+/// overwritten with the optimum; [`Objective::parameters`] then holds its coefficients.
+///
+/// The optimiser takes the steady-state shortcut; the reported values do not.
+/// `bfgs_scratch` holds at least [`bfgs::scratch_len`]`(x.len())` values.
+///
+/// # Errors
+///
+/// [`FitError::Degenerate`] if the likelihood cannot be evaluated at the optimum, or the
+/// innovations left there are negligible (below [`NOISE_FLOOR`] of the data's range).
+pub(crate) fn estimate(
+    objective: &mut Objective<'_>,
+    x: &mut [f64],
+    bfgs_scratch: &mut [f64],
+    max_iterations: usize,
+) -> Result<Estimate, FitError> {
+    let options = bfgs::Options {
+        max_iterations,
+        ..bfgs::Options::default()
+    };
+    let minimum = bfgs::minimize(
+        |u| match objective.evaluate(u, true) {
+            Some((llf, _, n)) => -llf / n as f64,
+            None => f64::INFINITY,
+        },
+        x,
+        bfgs_scratch,
+        options,
+    );
+
+    let (loglike, sigma2, nobs) = objective.evaluate(x, false).ok_or(FitError::Degenerate)?;
+    if math::sqrt(sigma2) <= NOISE_FLOOR * objective.range() {
+        return Err(FitError::Degenerate);
+    }
+
+    Ok(Estimate {
+        loglike,
+        sigma2,
+        nobs,
+        iterations: minimum.iterations,
+        converged: minimum.converged,
+    })
+}
+
+/// Writes the unconstrained form of `coefficients` into `out`, negated first for an AR
+/// part, or zeros if they are not stationary (or not invertible), as statsmodels starts.
+///
+/// `work` holds at least `3 coefficients.len()` values.
+pub(crate) fn unconstrain_part(
+    coefficients: &[f64],
+    negate: bool,
+    out: &mut [f64],
+    work: &mut [f64],
+) {
+    let n = coefficients.len();
+    let (input, work) = work.split_at_mut(n);
+    for (value, &c) in input.iter_mut().zip(coefficients) {
+        *value = if negate { -c } else { c };
+    }
+
+    if !transform::unconstrain(input, out, work) {
+        out[..n].fill(0.0);
     }
 }
 
