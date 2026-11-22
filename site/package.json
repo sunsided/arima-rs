@@ -16,7 +16,8 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
-		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"readme-charts": "node --preserve-symlinks scripts/readme-charts.ts"
 	},
 	"dependencies": {
 		"@sunsided/backshift": "portal:../bindings/wasm/pkg"

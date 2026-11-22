@@ -34,6 +34,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `site/`: a demo site for GitHub Pages (SvelteKit, built on the npm package) with three interactive panels: fit and
   forecast with intervals, streaming anomaly scores, and drift detection with in-place refits. `pages.yml` deploys it
   from `main`.
+- README charts (forecast, streaming anomalies, drift and refit) in light and dark variants, drawn by
+  `site/scripts/readme-charts.ts` with the site's chart code; CI checks that they are current.
 - Criterion benchmarks (`cargo bench`) and `ci/compare`, a comparison with foresight and anofox-forecast.
 
 ### Performance
