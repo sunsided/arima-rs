@@ -75,10 +75,19 @@ The crate is `no_std`. With `default-features = false` pick one of the floating-
 backshift = { version = "0.1", default-features = false, features = ["libm"] }
 ```
 
-CI links a `no_std`/`no_main` binary for `thumbv7em-none-eabihf` that runs the filter and forecasts with intervals, and
-a counting allocator asserts that `Filter::new`, `update`, `warm_up` and the forecasts allocate nothing. That binary
-comes out at about 21 KB of `.text`. A `Filter<R>` takes about `8 (R² + 4R)` bytes; `Filter::new` needs about three
-times that on the stack while it solves for the starting covariance.
+CI links a `no_std`/`no_main` binary for `thumbv7em-none-eabihf` that runs an ARIMA(1,1,1) filter and forecasts with
+intervals, and a counting allocator asserts that `Filter::new`, `update`, `warm_up`, the forecasts and the diagnostic
+tests allocate nothing. That binary comes out at about 30 KB of `.text`. The filter's state lives inline:
+
+| Capacity | `size_of::<Filter<R>>()` | Fits, for example |
+|---|---|---|
+| `R = 4` | 368 bytes | ARIMA(1,1,1), ARIMA(2,1,2) |
+| `R = 8` | 944 bytes | ARIMA(2,0,1)(1,0,0,4) |
+| `R = 16` | 2,864 bytes | ARIMA(1,0,0)(1,0,0,12) |
+| `R = 27` | 7,176 bytes | the airline model ARIMA(0,1,1)(0,1,1,12) |
+
+`Filter::new` needs about three times that on the stack while it solves for the starting covariance, and the
+forecasts about twice.
 
 ## Checked against statsmodels
 
@@ -109,10 +118,44 @@ Three conventions differ from statsmodels' defaults on purpose:
   less than 1e-19, which moves later innovations by up to about 1e-9, so the references are generated with
   `ssm.tolerance = 0`.
 
+## Benchmarks
+
+[`ci/compare`](ci/compare) fits the same models with backshift, [`foresight`](https://crates.io/crates/foresight) 0.7.3
+and [`anofox-forecast`](https://crates.io/crates/anofox-forecast) 0.21.0, with a mean or drift wherever `d + D <= 1`.
+It scores every crate's estimates with the same exact Gaussian log-likelihood (higher is better), so the column shows
+how close each optimiser gets to the maximum. Each repeat runs all crates back to back, and the table shows the fastest
+of 15 repeats (5 for the searches) on an Intel Core i7-13700H with Rust 1.100, release build:
+
+| Model | backshift | foresight | anofox-forecast |
+|---|---|---|---|
+| ARMA(2,1), n=300 | 0.41 ms, −423.0037 | 11.92 ms, −423.0037 | 0.30 ms, −423.0195 |
+| ARIMA(1,1,1) with drift, n=300 | 0.26 ms, −435.5482 | 5.95 ms, −435.5482 | 0.46 ms, −435.5591 |
+| airline (0,1,1)(0,1,1,12), n=144 | 1.53 ms, −194.3233 | 8.15 ms, −194.3233 | 0.20 ms, −195.2358 |
+
+Fully automatic auto-ARIMA, each crate choosing its own `d` and `D`:
+
+| Series | backshift | foresight | anofox-forecast |
+|---|---|---|---|
+| ARMA(2,1), n=300 | 11.2 ms, (2,0,1) | 49.6 ms, (2,0,1) | 5.8 ms, (2,0,1) |
+| ARIMA(1,1,1), n=300 | 7.3 ms, (0,1,2) | 35.9 ms, (0,1,2) | 3.7 ms, (0,1,2) |
+| airline, n=144 | 95.9 ms, (0,1,1)(0,1,1,12) | 229.2 ms, (0,2,2)(1,0,1,12) | 3,288 ms, (0,2,2)(1,0,1,12) |
+
+On the non-seasonal series all three pick the same model; anofox-forecast searches fastest there. On the seasonal
+series backshift recovers the generating airline model, because its STL seasonal-strength test finds the seasonal
+unit root; the other two crates miss it and difference twice at lag 1 instead.
+
+backshift and foresight reach the same maximum in the fits above; anofox-forecast is faster on the seasonal fit but
+stops short of the maximum on all three. Neither of the other two crates streams: backshift's `Filter::<27>::update`
+takes about 0.6 µs per value for the airline model.
+
+Reproduce with `cargo run --release --manifest-path ci/compare/Cargo.toml` (add `--features rayon` for the parallel
+seasonal search); `cargo bench` runs the in-crate Criterion benchmarks.
+
 ## Status
 
 The crate covers seasonal ARIMA(p, d, q)(P, D, Q, s) with an optional mean or drift and exogenous regressors, automatic
-order selection, STL and the usual diagnostics. Benchmarks against the other Rust crates are next; the
+order selection, STL and the usual diagnostics. Conformal prediction intervals and an online-learning mode are the next
+ideas; the
 [roadmap](https://github.com/sunsided/arima-rs/blob/main/docs/ROADMAP.md) has the details. The minimum supported Rust
 version is 1.85.
 

@@ -114,12 +114,20 @@ pub fn loglike_exog(
 /// The log-likelihood of the already differenced, demeaned series `w` under the ARMA part
 /// of `shape` (its AR and MA terms, seasonal ones included), with `sigma2` concentrated out.
 ///
+/// With `steady` it takes statsmodels' steady-state shortcut (see [`Workspace::run_steady`]),
+/// which the fitting objective uses; without it the full recursion runs, which the fit
+/// uses for the likelihood and `sigma2` it reports.
+///
 /// All innovation variances scale with `sigma2`, so the filter runs once with
 /// `sigma2 = 1`, and the maximising `sigma2 = sum(v_t^2 / F_t) / n` follows in closed
 /// form over the `n` non-missing values. Returns `(log-likelihood, sigma2, n)`, the
 /// same maximum as the full likelihood, or [`None`] if the model is invalid or no
 /// value is present.
-pub(crate) fn concentrated(w: &[f64], shape: &ArimaSpec<'_>) -> Option<(f64, f64, usize)> {
+pub(crate) fn concentrated(
+    w: &[f64],
+    shape: &ArimaSpec<'_>,
+    steady: bool,
+) -> Option<(f64, f64, usize)> {
     let spec = ArimaSpec {
         d: 0,
         mean: 0.0,
@@ -127,15 +135,19 @@ pub(crate) fn concentrated(w: &[f64], shape: &ArimaSpec<'_>) -> Option<(f64, f64
         ..*shape
     };
     let (mut count, mut log_variances, mut weighted) = (0_usize, 0.0, 0.0);
-    Workspace::new(&spec)
-        .ok()?
-        .run(w, |Innovation { value, variance }| {
-            if !value.is_nan() {
-                count += 1;
-                log_variances += math::ln(variance);
-                weighted += value * value / variance;
-            }
-        });
+    let sink = |Innovation { value, variance }: Innovation| {
+        if !value.is_nan() {
+            count += 1;
+            log_variances += math::ln(variance);
+            weighted += value * value / variance;
+        }
+    };
+    let workspace = Workspace::new(&spec).ok()?;
+    if steady {
+        workspace.run_steady(w, sink);
+    } else {
+        workspace.run(w, sink);
+    }
     if count == 0 {
         return None;
     }
@@ -191,6 +203,10 @@ pub(crate) fn differenced(y: &[f64], spec: &ArimaSpec<'_>) -> Vec<f64> {
         .collect()
 }
 
+/// statsmodels' default `ssm.tolerance`: the change in the innovation variance below
+/// which the filter counts as converged.
+const STEADY_STATE_TOLERANCE: f64 = 1e-19;
+
 /// Heap buffers for one filter run, sized to the model's state dimension `r`.
 struct Workspace {
     /// The padded first column of the transition matrix. Length `r`.
@@ -245,6 +261,53 @@ impl Workspace {
         for &value in y {
             sink(state_space::update(r, a, p, r, value, scratch));
             state_space::predict(system, a, p, r, scratch);
+        }
+    }
+
+    /// Like [`Workspace::run`], but once the innovation variance stops changing (by less
+    /// than [`STEADY_STATE_TOLERANCE`]) the covariance and gain are frozen, and each further
+    /// step only moves the state: `O(r)` instead of `O(r^2)`.
+    ///
+    /// statsmodels takes the same shortcut by default; it moves results by about 1e-9, so
+    /// it is used for the fitting objective only. A missing value after convergence resumes
+    /// the full recursion from the frozen (still valid) covariance.
+    fn run_steady(mut self, y: &[f64], mut sink: impl FnMut(Innovation)) {
+        let r = self.phi.len();
+        let (system, a, p, scratch) = self.parts();
+        let mut steady = false;
+        let mut gain = vec![0.0; r];
+        let mut previous = f64::NAN;
+        for &value in y {
+            if steady && !value.is_nan() {
+                let variance = p[0];
+                let innovation = value - a[0];
+                for (state, k) in a.iter_mut().zip(&gain) {
+                    *state += k * innovation / variance;
+                }
+
+                state_space::transition_vector(system, a);
+                sink(Innovation {
+                    value: innovation,
+                    variance,
+                });
+                continue;
+            }
+
+            if steady {
+                // A missing value breaks the steady state; continue from the frozen covariance.
+                steady = false;
+                previous = f64::NAN;
+            }
+
+            sink(state_space::update(r, a, p, r, value, scratch));
+            state_space::predict(system, a, p, r, scratch);
+            if (p[0] - previous).abs() < STEADY_STATE_TOLERANCE {
+                steady = true;
+                // The steady-state update uses the predicted covariance's first column.
+                gain.copy_from_slice(&p[..r]);
+            }
+
+            previous = p[0];
         }
     }
 

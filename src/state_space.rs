@@ -69,23 +69,32 @@ pub(crate) fn predict(
 
     // Row 0 of the old P; by symmetry it is also column 0.
     row0[..r].copy_from_slice(&p[..r]);
-    let old = |i: usize| if i < r { row0[i] } else { 0.0 };
-    for i in 0..r {
-        for j in i..r {
-            // (T P T')_ij with T = [phi | shift]: every term reads row 0 or row i + 1 >= i,
-            // which this loop has not overwritten yet.
-            let shifted = if j + 1 < r && i + 1 < r {
-                p[(i + 1) * stride + j + 1]
-            } else {
-                0.0
-            };
-            p[i * stride + j] = sys.phi[i] * sys.phi[j] * row0[0]
-                + sys.phi[i] * old(j + 1)
-                + sys.phi[j] * old(i + 1)
-                + shifted
-                + sys.noise(i, j);
+    let p00 = row0[0];
+    let last = r - 1;
+
+    // (T P T')_ij with T = [phi | shift]
+    //   = phi_i phi_j P00 + phi_i P0(j+1) + phi_j P0(i+1) + P(i+1)(j+1) + noise_ij,
+    // where every index past the last state contributes zero. Every term reads row 0
+    // or row i + 1 >= i, which this loop has not overwritten yet. The last row and column
+    // are split off so the inner loop has no branches.
+    for i in 0..last {
+        let (phi_i, next_i) = (sys.phi[i], row0[i + 1]);
+        let (sel_i, row, below) = (sys.sigma2 * sys.selection[i], i * stride, (i + 1) * stride);
+        for j in i..last {
+            let phi_j = sys.phi[j];
+            p[row + j] = phi_i * phi_j * p00
+                + phi_i * row0[j + 1]
+                + phi_j * next_i
+                + p[below + j + 1]
+                + sel_i * sys.selection[j];
         }
+
+        let phi_last = sys.phi[last];
+        p[row + last] = phi_i * phi_last * p00 + phi_last * next_i + sel_i * sys.selection[last];
     }
+
+    let phi_last = sys.phi[last];
+    p[last * stride + last] = phi_last * phi_last * p00 + sys.noise(last, last);
 
     mirror_upper(p, r, stride);
 }
@@ -125,10 +134,13 @@ pub(crate) fn update(
     gain[..r].copy_from_slice(&p[..r]);
     for i in 0..r {
         a[i] += gain[i] * value / variance;
-        for j in 0..r {
+        // The update is symmetric, so compute the upper triangle and mirror it.
+        for j in i..r {
             p[i * stride + j] -= gain[i] * gain[j] / variance;
         }
     }
+
+    mirror_upper(p, r, stride);
 
     Innovation { value, variance }
 }
@@ -173,9 +185,9 @@ pub(crate) fn stationary_covariance(
     }
 
     for _ in 0..MAX_DOUBLINGS {
-        // term = A P A'
-        multiply(product, power, p, r, stride, false);
-        multiply(term, product, power, r, stride, true);
+        // term = A P A', symmetric because P is.
+        multiply(product, power, p, r, stride);
+        multiply_transposed_symmetric(term, product, power, r, stride);
 
         let mut change: f64 = 0.0;
         let mut size: f64 = 0.0;
@@ -198,7 +210,7 @@ pub(crate) fn stationary_covariance(
         }
 
         // A = A A
-        multiply(product, power, power, r, stride, false);
+        multiply(product, power, power, r, stride);
         for i in 0..r {
             power[i * stride..i * stride + r].copy_from_slice(&product[i * stride..i * stride + r]);
         }
@@ -218,23 +230,39 @@ fn transition(sys: System<'_>, i: usize, j: usize) -> f64 {
     }
 }
 
-/// Writes `a b` (or `a b'` when `transpose_b`) into `out`. All are `r x r` with row `stride`.
-fn multiply(out: &mut [f64], a: &[f64], b: &[f64], r: usize, stride: usize, transpose_b: bool) {
+/// Writes `a b` into `out`. All are `r x r` with row `stride`.
+///
+/// Runs in `i, k, j` order so the inner loop walks rows of `b` contiguously, and skips
+/// zero entries of `a`: the early powers of `T` are mostly zeros.
+fn multiply(out: &mut [f64], a: &[f64], b: &[f64], r: usize, stride: usize) {
     for i in 0..r {
-        for j in 0..r {
-            let mut sum = 0.0;
-            for k in 0..r {
-                let b_kj = if transpose_b {
-                    b[j * stride + k]
-                } else {
-                    b[k * stride + j]
-                };
-                sum += a[i * stride + k] * b_kj;
+        let row = &mut out[i * stride..i * stride + r];
+        row.fill(0.0);
+        for k in 0..r {
+            let a_ik = a[i * stride + k];
+            if a_ik == 0.0 {
+                continue;
             }
 
-            out[i * stride + j] = sum;
+            for (o, b_kj) in row.iter_mut().zip(&b[k * stride..k * stride + r]) {
+                *o += a_ik * b_kj;
+            }
         }
     }
+}
+
+/// Writes `a b'` into `out` when the result is known to be symmetric: only the upper
+/// triangle is computed, as row-by-row dot products, then mirrored.
+fn multiply_transposed_symmetric(out: &mut [f64], a: &[f64], b: &[f64], r: usize, stride: usize) {
+    for i in 0..r {
+        let a_row = &a[i * stride..i * stride + r];
+        for j in i..r {
+            let b_row = &b[j * stride..j * stride + r];
+            out[i * stride + j] = a_row.iter().zip(b_row).map(|(x, y)| x * y).sum();
+        }
+    }
+
+    mirror_upper(out, r, stride);
 }
 
 /// Copies the upper triangle of the `r x r` matrix `p` onto its lower triangle.

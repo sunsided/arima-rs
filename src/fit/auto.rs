@@ -409,25 +409,36 @@ impl Search<'_> {
             (1, 1, 0, 0),
         ];
 
-        for (dp, dq, dsp, dsq) in MOVES {
+        // The candidates in R's order: the 16 moves, then the constant toggle.
+        let mut candidates: Vec<Key> = MOVES
+            .iter()
+            .filter_map(|&delta| moved(at, delta, max))
+            .map(|orders| (orders, constant))
+            .collect();
+        if self.constant_allowed {
+            candidates.push((at, !constant));
+        }
+        candidates.retain(|key| !self.cache.contains_key(key));
+
+        // With rayon, a seasonal search fits every candidate at once. Either way they are
+        // recorded in order and the walk stops at the first improvement, so the search, its
+        // cache and its model cap behave exactly as the sequential R algorithm; fits past
+        // the first improvement are discarded. Non-seasonal candidates are cheap enough that
+        // the discarded fits cost more than the parallelism saves, so they stay sequential.
+        let mut speculative = self.speculate(&candidates).into_iter();
+
+        for key in candidates {
             if self.cache.len() >= MAX_STEPWISE_MODELS {
                 return None;
             }
 
-            let Some(next) = moved(at, (dp, dq, dsp, dsq), max) else {
-                continue;
-            };
+            let score = speculative
+                .next()
+                .unwrap_or_else(|| self.score(key.0, key.1));
 
-            if self.try_model(next, constant) {
-                return Some((next, constant));
+            if self.record(key, score) {
+                return Some(key);
             }
-        }
-
-        if self.constant_allowed
-            && self.cache.len() < MAX_STEPWISE_MODELS
-            && self.try_model(at, !constant)
-        {
-            return Some((at, !constant));
         }
 
         None
@@ -480,6 +491,19 @@ impl Search<'_> {
             keys.iter()
                 .map(|&(orders, constant)| self.score(orders, constant))
                 .collect()
+        }
+    }
+
+    /// Scores all `keys` in parallel for a seasonal search with the `rayon` feature, and
+    /// nothing otherwise (the caller then scores lazily).
+    ///
+    /// Only as many candidates as the model cap leaves room for are fitted.
+    fn speculate(&self, keys: &[Key]) -> Vec<(f64, Option<Fitted>)> {
+        if cfg!(feature = "rayon") && self.seasonal {
+            let room = MAX_STEPWISE_MODELS.saturating_sub(self.cache.len());
+            self.score_all(&keys[..keys.len().min(room)])
+        } else {
+            Vec::new()
         }
     }
 
