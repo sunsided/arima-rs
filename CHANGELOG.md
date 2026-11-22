@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.2.1](https://github.com/sunsided/arima-rs/compare/v0.2.0...v0.2.1) - 2026-11-22
+
+### Fixed
+
+- Fix the README's images and links on crates.io
+
 ## [0.2.0](https://github.com/sunsided/arima-rs/compare/v0.1.0...v0.2.0) - 2026-11-22
 
 ### Added
