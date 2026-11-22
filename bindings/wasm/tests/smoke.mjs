@@ -45,6 +45,9 @@ assert.equal(filterCapacity(), 64);
 assert.throws(() => Model.fit(y, 0, 0, 0, 1, 0, 0, 0), /period/);
 assert.throws(() => Model.fit(y.slice(0, 3), 2, 0, 2, 0, 0, 0, 0), /needs/);
 assert.throws(() => new Stream(Model.fit(y, 0, 1, 1, 0, 1, 1, 52)), /states/);
+// Orders that are each in range can still ask for thousands of states; they are refused.
+assert.throws(() => Model.fit(y, 0, 0, 0, 8, 0, 8, 366), /states/);
+assert.throws(() => Model.autoArima(y, 100), /periods up to/);
 assert.ok(Model.fit(y, 1, 0, 0, 0, 0, 0, 0).sigma2 > 0, "the instance survives the errors");
 
 // A model fitted elsewhere streams without a fit.

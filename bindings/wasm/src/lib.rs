@@ -36,6 +36,11 @@ const MAX_DIFFERENCING: usize = 2;
 /// The longest season.
 const MAX_PERIOD: usize = 366;
 
+/// The most states a model may have, `max(p + P s, q + Q s + 1) + d + D s`: the per-order
+/// caps alone allow thousands at a long period, and a fit's memory and time grow with
+/// the square of the state count. The airline model at period 52 needs 107.
+const MAX_STATES: usize = 128;
+
 /// The streaming filter the bindings use.
 type DeviceFilter = Filter<CAPACITY>;
 
@@ -84,6 +89,7 @@ impl Model {
             )));
         }
 
+        check_states(p, d, q, seasonal_p, seasonal_d, seasonal_q, period)?;
         let model = backshift::Arima::new(p, d, q);
         let model = if seasonal {
             model.seasonal(seasonal_p, seasonal_d, seasonal_q, period)
@@ -115,7 +121,23 @@ impl Model {
         }
 
         let search = if period > 1 {
-            AutoArima::new().seasonal(period)
+            // R's bounds, p, q <= 5 and P, Q <= 2, with d <= 2 and D <= 1; at long periods the
+            // seasonal orders shrink to 1 so every candidate stays within the state bound.
+            let fits =
+                |seasonal: usize| states(5, 2, 5, seasonal, 1, seasonal, period) <= MAX_STATES;
+            let seasonal = if fits(2) {
+                2
+            } else if fits(1) {
+                1
+            } else {
+                return Err(JsError::new(&format!(
+                    "a seasonal search supports periods up to {}",
+                    (MAX_STATES - 8) / 2
+                )));
+            };
+            AutoArima::new()
+                .seasonal(period)
+                .max_orders(5, 5, seasonal, seasonal)
         } else {
             AutoArima::new()
         };
@@ -129,7 +151,8 @@ impl Model {
     /// A model from known coefficients, for example ones fitted in statsmodels or R, in
     /// their sign convention: `phi(B) Phi(B^s) w_t = theta(B) Theta(B^s) e_t` with
     /// `w_t = (1 - B)^d (1 - B^s)^D y_t - mean` and `Var(e_t) = sigma2`. It streams and
-    /// forecasts like a fitted model; its likelihood and criteria are `NaN`.
+    /// forecasts like a fitted model; its likelihood, AIC and BIC are `NaN` and its AICc is
+    /// infinite.
     ///
     /// # Errors
     ///
@@ -159,6 +182,16 @@ impl Model {
                 "a seasonal part needs a period between 2 and {MAX_PERIOD}"
             )));
         }
+
+        check_states(
+            ar.len(),
+            d,
+            ma.len(),
+            seasonal_ar.len(),
+            seasonal_d,
+            seasonal_ma.len(),
+            period,
+        )?;
 
         let fitted = Fitted {
             ar,
@@ -497,6 +530,42 @@ fn check_orders(p: usize, d: usize, q: usize) -> Result<(), JsError> {
     if p > MAX_ORDER || q > MAX_ORDER || d > MAX_DIFFERENCING {
         return Err(JsError::new(&format!(
             "orders must be at most {MAX_ORDER} and differencing at most {MAX_DIFFERENCING}"
+        )));
+    }
+
+    Ok(())
+}
+
+/// The state count of an ARIMA(p, d, q)(P, D, Q, s) model, `ArimaSpec::capacity()`
+/// without regressors.
+const fn states(
+    p: usize,
+    d: usize,
+    q: usize,
+    seasonal_p: usize,
+    seasonal_d: usize,
+    seasonal_q: usize,
+    period: usize,
+) -> usize {
+    let ar = p + seasonal_p * period;
+    let ma = q + seasonal_q * period + 1;
+    (if ar > ma { ar } else { ma }) + d + seasonal_d * period
+}
+
+/// Rejects models with more than [`MAX_STATES`] states.
+fn check_states(
+    p: usize,
+    d: usize,
+    q: usize,
+    seasonal_p: usize,
+    seasonal_d: usize,
+    seasonal_q: usize,
+    period: usize,
+) -> Result<(), JsError> {
+    let needed = states(p, d, q, seasonal_p, seasonal_d, seasonal_q, period);
+    if needed > MAX_STATES {
+        return Err(JsError::new(&format!(
+            "the model needs {needed} states; at most {MAX_STATES} are supported"
         )));
     }
 

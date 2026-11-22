@@ -116,8 +116,8 @@ jobs:
           npm install @sunsided/backshift@${version}
           \`\`\`"
           flags=(--verify-tag --notes "$notes" --title "@sunsided/backshift ${version}")
-          # A suffix like -rc.1 marks a prerelease.
-          if [[ "$TAG" == *-* ]]; then flags+=(--prerelease); fi
+          # A suffix like -rc.1 marks a prerelease; the tag's own `wasm-v` prefix does not.
+          if [[ "$version" == *-* ]]; then flags+=(--prerelease); fi
           gh release create "$TAG" "${flags[@]}" "sunsided-backshift-${version}.tgz"
 
   publish-github:
@@ -157,8 +157,8 @@ jobs:
             exit 0
           fi
           flags=(--ignore-scripts)
-          # Prereleases don't become `latest`.
-          if [[ "$TAG" == *-* ]]; then flags+=(--tag next); fi
+          # Prereleases don't become `latest`; test the version, the tag always has a hyphen.
+          if [[ "$version" == *-* ]]; then flags+=(--tag next); fi
           npm publish package.tgz "${flags[@]}"
 
   publish-npm:
@@ -206,6 +206,6 @@ jobs:
             exit 0
           fi
           flags=(--ignore-scripts --access public --loglevel verbose)
-          # Prereleases don't become `latest`.
-          if [[ "$TAG" == *-* ]]; then flags+=(--tag next); fi
+          # Prereleases don't become `latest`; test the version, the tag always has a hyphen.
+          if [[ "$version" == *-* ]]; then flags+=(--tag next); fi
           npm publish package.tgz "${flags[@]}"
