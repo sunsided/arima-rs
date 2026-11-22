@@ -31,6 +31,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `bindings/wasm`: the `@sunsided/backshift` npm package (WebAssembly, ES module) with `Model.fit`,
   `Model.autoArima`, forecasts with intervals, `Stream` for streaming innovations, `refit` and `ljungBox`, built
   with the `libm` backend. `publish-npm.yml` publishes it to GitHub Packages and npmjs.com on `wasm-v*` tags.
+- `site/`: a demo site for GitHub Pages (SvelteKit, built on the npm package) with three interactive panels: fit and
+  forecast with intervals, streaming anomaly scores, and drift detection with in-place refits. `pages.yml` deploys it
+  from `main`.
 - Criterion benchmarks (`cargo bench`) and `ci/compare`, a comparison with foresight and anofox-forecast.
 
 ### Performance
