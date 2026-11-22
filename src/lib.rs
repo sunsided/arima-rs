@@ -65,9 +65,9 @@ pub use crate::difference::{difference, integrate};
 pub use crate::filter::{ArimaSpec, Filter, FilterError, Seasonal};
 #[cfg(feature = "alloc")]
 pub use crate::fit::{
-    Arima, ArmaCoefficients, AutoArima, AutoFit, Criterion, FitError, Fitted, hannan_rissanen,
-    nsdiffs,
+    Arima, ArmaCoefficients, AutoArima, AutoFit, Criterion, Fitted, hannan_rissanen, nsdiffs,
 };
+pub use crate::fit::{FitError, Refit, RefitOptions, Refitter};
 #[cfg(feature = "alloc")]
 pub use crate::likelihood::{innovations, innovations_exog, loglike, loglike_exog};
 pub use crate::normal::normal_quantile;
@@ -81,15 +81,12 @@ use core::borrow::Borrow;
 
 #[cfg(feature = "alloc")]
 mod autoregressive;
-#[cfg(feature = "alloc")]
 mod buffer;
 mod diagnostics;
 #[cfg(feature = "alloc")]
 mod difference;
 mod filter;
-#[cfg(feature = "alloc")]
 mod fit;
-#[cfg(feature = "alloc")]
 mod likelihood;
 mod math;
 mod normal;

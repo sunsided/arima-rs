@@ -46,7 +46,6 @@ pub(crate) fn exp(x: f64) -> f64 {
 }
 
 /// The dot product of two equally long slices.
-#[cfg(feature = "alloc")]
 pub(crate) fn dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b).map(|(a, b)| a * b).sum()
 }

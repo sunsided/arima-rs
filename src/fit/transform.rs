@@ -7,8 +7,6 @@
 //! statsmodels' `constrain_stationary_univariate` and its inverse (Monahan 1984).
 
 use crate::math;
-use alloc::vec;
-use alloc::vec::Vec;
 
 /// Writes the `y` coefficients of statsmodels' step-up recursion for the unconstrained
 /// `x` into `out`, with `work` as scratch. Both hold at least `x.len()` values.
@@ -29,39 +27,56 @@ pub(crate) fn constrain(x: &[f64], out: &mut [f64], work: &mut [f64]) {
     }
 }
 
-/// The inverse of [`constrain`]. Returns [`None`] if `y` is not stationary, so some
-/// partial autocorrelation is not inside `(-1, 1)`.
-pub(crate) fn unconstrain(y: &[f64]) -> Option<Vec<f64>> {
+/// Writes the inverse of [`constrain`] for `y` into `out`, with `work` as scratch of
+/// `2 y.len()` values; `out` holds at least `y.len()`.
+///
+/// Returns `false`, leaving `out` unspecified, if `y` is not stationary, so some partial
+/// autocorrelation is not inside `(-1, 1)`.
+pub(crate) fn unconstrain(y: &[f64], out: &mut [f64], work: &mut [f64]) -> bool {
     let n = y.len();
-    let mut row = y.to_vec();
-    let mut r = vec![0.0; n];
+    let (row, previous) = work[..2 * n].split_at_mut(n);
+    let r = &mut out[..n];
+    row.copy_from_slice(y);
     for k in (0..n).rev() {
         let rk = row[k];
         if rk.is_nan() || rk.abs() >= 1.0 {
-            return None;
+            return false;
         }
 
         r[k] = rk;
         let scale = 1.0 - rk * rk;
-        let previous: Vec<f64> = (0..k)
-            .map(|i| (row[i] - rk * row[k - i - 1]) / scale)
-            .collect();
-        row[..k].copy_from_slice(&previous);
+        for i in 0..k {
+            previous[i] = (row[i] - rk * row[k - i - 1]) / scale;
+        }
+
+        row[..k].copy_from_slice(&previous[..k]);
     }
 
-    Some(r.iter().map(|&rk| rk / math::sqrt(1.0 - rk * rk)).collect())
+    for value in r {
+        *value /= math::sqrt(1.0 - *value * *value);
+    }
+
+    true
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use float_cmp::assert_approx_eq;
+    use std::vec;
+    use std::vec::Vec;
 
     /// [`constrain`] into a fresh vector.
     fn constrained(x: &[f64]) -> Vec<f64> {
         let (mut out, mut work) = (vec![0.0; x.len()], vec![0.0; x.len()]);
         constrain(x, &mut out, &mut work);
         out
+    }
+
+    /// [`unconstrain`] into a fresh vector, or [`None`] if `y` is not stationary.
+    fn unconstrained(y: &[f64]) -> Option<Vec<f64>> {
+        let (mut out, mut work) = (vec![0.0; y.len()], vec![0.0; 2 * y.len()]);
+        unconstrain(y, &mut out, &mut work).then_some(out)
     }
 
     #[test]
@@ -77,7 +92,7 @@ mod tests {
     #[test]
     fn round_trips() {
         let x = [0.3, -2.5, 1.1, 0.0];
-        let back = unconstrain(&constrained(&x)).unwrap();
+        let back = unconstrained(&constrained(&x)).unwrap();
         for (a, b) in x.iter().zip(&back) {
             assert_approx_eq!(f64, *a, *b, epsilon = 1e-10);
         }
@@ -86,8 +101,8 @@ mod tests {
     #[test]
     fn rejects_non_stationary() {
         // AR coefficients phi = -y: phi = [1.0] is a unit root, phi = [0.5, 0.6] is explosive.
-        assert_eq!(unconstrain(&[-1.0]), None);
-        assert_eq!(unconstrain(&[-0.5, -0.6]), None);
-        assert!(unconstrain(&[-0.5, 0.3]).is_some());
+        assert_eq!(unconstrained(&[-1.0]), None);
+        assert_eq!(unconstrained(&[-0.5, -0.6]), None);
+        assert!(unconstrained(&[-0.5, 0.3]).is_some());
     }
 }

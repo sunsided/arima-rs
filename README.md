@@ -75,9 +75,10 @@ The crate is `no_std`. With `default-features = false` pick one of the floating-
 backshift = { version = "0.1", default-features = false, features = ["libm"] }
 ```
 
-CI links a `no_std`/`no_main` binary for `thumbv7em-none-eabihf` that runs an ARIMA(1,1,1) filter and forecasts with
-intervals, and a counting allocator asserts that `Filter::new`, `update`, `warm_up`, the forecasts and the diagnostic
-tests allocate nothing. That binary comes out at about 30 KB of `.text`. The filter's state lives inline:
+CI links a `no_std`/`no_main` binary for `thumbv7em-none-eabihf` that runs an ARIMA(1,1,1) filter, forecasts with
+intervals and refits the model, and a counting allocator asserts that `Filter::new`, `update`, `warm_up`, the
+forecasts, the diagnostic tests and a refit allocate nothing. That binary comes out at about 52 KB of `.text`, of which
+the refit is about 21 KB. The filter's state lives inline:
 
 | Capacity | `size_of::<Filter<R>>()` | Fits, for example |
 |---|---|---|
@@ -88,6 +89,37 @@ tests allocate nothing. That binary comes out at about 30 KB of `.text`. The fil
 
 `Filter::new` needs about three times that on the stack while it solves for the starting covariance, and the
 forecasts about twice.
+
+## Refitting on the device
+
+`ArimaSpec::refit` re-estimates a model by exact maximum likelihood on a window of recent values, without a heap. It
+starts from the model's current coefficients and runs the same objective and optimiser as `Arima::fit`, so a device
+can notice that its innovations are no longer white (`ljung_box` on them) and adapt in place. The caller owns all
+memory: `refit_scratch_len` and `coefficient_len` are `const fn`s, so `Refitter` can hold both buffers in a `static`.
+
+```rust
+use backshift::{ArimaSpec, Filter, RefitOptions, Refitter, Seasonal};
+
+const MODEL: ArimaSpec<'static> = ArimaSpec {
+    ar: &[0.5], d: 1, ma: &[0.3], seasonal: Seasonal::NONE, exog: &[], mean: 0.0, sigma2: 1.0,
+};
+const WINDOW: usize = 64;
+const OPTIONS: RefitOptions = RefitOptions { mean: true, max_iterations: 100 };
+static REFITTER: std::sync::Mutex<
+    Refitter<{ MODEL.refit_scratch_len(WINDOW, OPTIONS) }, { MODEL.coefficient_len() }>,
+> = std::sync::Mutex::new(Refitter::new());
+
+let window: [f64; WINDOW] = core::array::from_fn(|t| 0.1 * t as f64 + ((t * 7) % 5) as f64 / 4.0);
+let mut refitter = REFITTER.lock().unwrap();
+let refit = refitter.refit(&MODEL, &window, OPTIONS).unwrap();
+let mut filter = Filter::<4>::new(&refit.spec).unwrap();
+filter.warm_up(&window); // continue from the end of the window
+```
+
+A failed refit, such as `FitError::Degenerate` from a stuck sensor, leaves the running model untouched. The scratch is
+about `4 r² + (exog.len() + 2) n` values for `r` ARMA states and `n` differenced values: 2.2 KB for ARIMA(1,1,1) with
+drift over 100 values, 9.3 KB for the airline model over 144. [`examples/device_refit.rs`](examples/device_refit.rs)
+runs the whole loop: stream, check every window, refit on drift, swap.
 
 ## Checked against statsmodels
 

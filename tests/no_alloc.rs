@@ -1,11 +1,11 @@
 //! Proves the device path never allocates.
 //!
 //! A counting global allocator wraps the system one. The test builds a
-//! [`Filter`], warms it up, streams values, forecasts with intervals, and asserts that
-//! the count did not move. It runs without the libtest harness
+//! [`Filter`], warms it up, streams values, forecasts with intervals, refits the model
+//! on a window and swaps the new one in, and asserts that the count did not move. It runs without the libtest harness
 //! (`harness = false`), so no harness thread allocates while it measures.
 
-use backshift::{ArimaSpec, Filter};
+use backshift::{ArimaSpec, Filter, RefitOptions, Refitter, Seasonal};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -32,6 +32,31 @@ unsafe impl GlobalAlloc for Counting {
 
 #[global_allocator]
 static GLOBAL: Counting = Counting;
+
+/// The orders the refit is sized for: ARIMA(1, 1, 1) with drift.
+const MODEL: ArimaSpec<'static> = ArimaSpec {
+    ar: &[0.5],
+    d: 1,
+    ma: &[0.3],
+    seasonal: Seasonal::NONE,
+    exog: &[],
+    mean: 0.0,
+    sigma2: 1.0,
+};
+
+/// The refit window length.
+const WINDOW: usize = 48;
+
+/// Refit with a drift, as the model was fitted.
+const OPTIONS: RefitOptions = RefitOptions {
+    mean: true,
+    max_iterations: 100,
+};
+
+/// The refitter, sized at compile time and kept out of the stack.
+static REFITTER: std::sync::Mutex<
+    Refitter<{ MODEL.refit_scratch_len(WINDOW, OPTIONS) }, { MODEL.coefficient_len() }>,
+> = std::sync::Mutex::new(Refitter::new());
 
 fn main() {
     let history = [0.3, -0.4, 1.1, 0.2, -0.9, 0.5, 0.0, 0.7];
@@ -73,6 +98,18 @@ fn main() {
         backshift::jarque_bera(&history),
         backshift::kpss(&history, backshift::KpssNull::Level, 2),
     ));
+
+    let window: [f64; WINDOW] = core::array::from_fn(|t| {
+        let t = f64::from(u32::try_from(t).expect("small"));
+        0.2 * t + (t * 1.7).sin()
+    });
+    let mut refitter = REFITTER.lock().expect("not poisoned");
+    let refit = refitter
+        .refit(&MODEL, &window, OPTIONS)
+        .expect("the window fits");
+    let mut refitted = Filter::<4>::new(&refit.spec).expect("stationary model");
+    refitted.warm_up(&window);
+    std::hint::black_box(refitted.update(10.0));
 
     let after = ALLOCATIONS.load(Ordering::SeqCst);
     std::hint::black_box((&mean, &variance, &lower, &upper));

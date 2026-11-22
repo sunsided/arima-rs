@@ -23,9 +23,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   series.
 - The `rayon` feature fits the candidates of an exhaustive `AutoArima` search in parallel, and the neighbours of a
   seasonal stepwise search speculatively (with identical results).
+- Heap-free refitting: `ArimaSpec::refit` and `refit_exog` re-estimate a model on a window of recent values by exact
+  maximum likelihood, warm-started from its current coefficients, in caller-owned memory sized by the `const fn`s
+  `refit_scratch_len` and `coefficient_len`. `Refitter` holds both buffers inline, `RefitOptions` sets the mean and
+  the iteration limit, and `Refit` returns the new spec with its log-likelihood. `FitError` is available without
+  `alloc` and gains `BufferTooSmall`. `examples/device_refit.rs` shows a drift-check-and-refit loop.
 - Criterion benchmarks (`cargo bench`) and `ci/compare`, a comparison with foresight and anofox-forecast.
 
 ### Performance
+
+- Fitting allocates once per fit instead of on every likelihood evaluation and optimiser step.
 
 - The Lyapunov solve uses branch-free, symmetry-aware matrix products, and the Kalman predict and update steps skip
   the redundant half of the symmetric covariance: about 4x faster starting covariances and 1.5x faster likelihoods.
@@ -41,6 +48,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `FitError` gains `Degenerate`: a model that fits the series exactly (a constant series with a mean, a straight
   line with a drift) has zero innovation variance, and `Arima::fit` now returns this error instead of a model with
   `sigma2 = 0` and an infinite log-likelihood that `Filter::new` rejects.
+- A fit whose innovations are rounding noise (below 1e-12 of the data) returns `FitError::Degenerate` too, so an exact
+  fit is caught however the optimiser approaches it.
 - `Arima::fit` and `fit_exog` treat infinite values in `y` or the regressors as missing, as `NaN` already was.
 - `cov` returns `None` for two series with different estimators instead of using the first one's.
 - `AutoArima` reports the error of the simplest failed candidate when no candidate fits, instead of
