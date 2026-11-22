@@ -37,7 +37,7 @@
 	<p class="lede">
 		A device runs an AR(1) with φ = {BEFORE}. Halfway, the process changes. After every {WINDOW} values the device
 		runs Ljung–Box on its standardised innovations; below p = {DRIFT_ALPHA} it refits on that window, warm-started
-		from the current model, and swaps the new filter in. The refit is the heap-free one: a microcontroller runs it in
+		from the current model, and swaps the new filter in. The refit is heap-free: a microcontroller runs it in
 		a fixed buffer.
 	</p>
 
