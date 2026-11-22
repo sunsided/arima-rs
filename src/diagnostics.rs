@@ -176,10 +176,23 @@ pub fn kpss_lags(n: usize) -> usize {
     rounded.min(n.saturating_sub(1))
 }
 
+/// The short KPSS lag rule, `trunc(4 (n / 100)^(1/4))`, capped at `n - 1`.
+///
+/// Kwiatkowski et al. (1992) call it `l4`; R's `tseries::kpss.test` (`lshort = TRUE`) and
+/// pmdarima use it. With fewer lags than [`kpss_lags`] the test keeps more power on
+/// short series, which matters when it decides the differencing order.
+#[must_use]
+pub fn kpss_short_lags(n: usize) -> usize {
+    // Truncation is the floor for this non-negative value.
+    let lags = (4.0 * math::sqrt(math::sqrt(n as f64 / 100.0))) as usize;
+    lags.min(n.saturating_sub(1))
+}
+
 /// The number of differences that make `x` level-stationary by KPSS, at most `max_d`.
 ///
-/// Differences while [`kpss`] (level, [`kpss_lags`]) rejects stationarity at `alpha`,
-/// the approach of R's `forecast::ndiffs`. Use it to pick `d` before fitting.
+/// Differences while [`kpss`] (level, with [`kpss_short_lags`]) rejects stationarity at
+/// `alpha`, the approach of R's `forecast::ndiffs` and pmdarima. Use it to pick `d` before
+/// fitting.
 ///
 /// The KPSS table only covers `[0.01, 0.10]`, so `alpha` is clamped to that range, as R
 /// does, and a test rejects when its statistic exceeds the critical value at `alpha`
@@ -209,7 +222,7 @@ pub fn ndiffs(x: &[f64], alpha: f64, max_d: usize) -> usize {
     let mut series: alloc::vec::Vec<f64> = x.iter().copied().filter(|v| v.is_finite()).collect();
     let critical = critical_value(alpha, LEVEL_CRITICAL);
     for d in 0..max_d {
-        match kpss(&series, KpssNull::Level, kpss_lags(series.len())) {
+        match kpss(&series, KpssNull::Level, kpss_short_lags(series.len())) {
             Some(test) if test.statistic > critical => {
                 series = crate::difference(&series, 1);
             }
@@ -333,6 +346,16 @@ mod tests {
         assert_eq!(kpss_lags(60), 11);
         assert_eq!(kpss_lags(5), 4);
         assert_eq!(kpss_lags(1000), 22);
+    }
+
+    #[test]
+    fn kpss_short_lags_follow_pmdarima() {
+        // int(np.trunc(4 * (n / 100) ** 0.25)).
+        assert_eq!(kpss_short_lags(100), 4);
+        assert_eq!(kpss_short_lags(150), 4);
+        assert_eq!(kpss_short_lags(60), 3);
+        assert_eq!(kpss_short_lags(1000), 7);
+        assert_eq!(kpss_short_lags(2), 1);
     }
 
     /// A random walk from a fixed linear congruential generator, `n` values.

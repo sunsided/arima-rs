@@ -57,16 +57,23 @@ extern crate std;
 pub use crate::autoregressive::{ArCoefficients, burg, yule_walker};
 #[cfg(feature = "alloc")]
 pub use crate::diagnostics::ndiffs;
-pub use crate::diagnostics::{KpssNull, TestResult, jarque_bera, kpss, kpss_lags, ljung_box};
+pub use crate::diagnostics::{
+    KpssNull, TestResult, jarque_bera, kpss, kpss_lags, kpss_short_lags, ljung_box,
+};
 #[cfg(feature = "alloc")]
 pub use crate::difference::{difference, integrate};
 pub use crate::filter::{ArimaSpec, Filter, FilterError, Seasonal};
 #[cfg(feature = "alloc")]
-pub use crate::fit::{Arima, ArmaCoefficients, FitError, Fitted, hannan_rissanen};
+pub use crate::fit::{
+    Arima, ArmaCoefficients, AutoArima, AutoFit, Criterion, FitError, Fitted, hannan_rissanen,
+    nsdiffs,
+};
 #[cfg(feature = "alloc")]
 pub use crate::likelihood::{innovations, innovations_exog, loglike, loglike_exog};
 pub use crate::normal::normal_quantile;
 pub use crate::state_space::Innovation;
+#[cfg(feature = "alloc")]
+pub use crate::stl::{Decomposition, stl};
 pub use crate::time_series::{TimeSeries, TimeSeriesError};
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
@@ -87,6 +94,8 @@ mod normal;
 mod polynomial;
 mod special;
 mod state_space;
+#[cfg(feature = "alloc")]
+mod stl;
 mod time_series;
 
 /// Compiles the README's code examples as doctests, so they cannot drift.

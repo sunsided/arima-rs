@@ -16,6 +16,7 @@ jobs:
       matrix:
         features:
           - ""
+          - "--features rayon"
           - "--no-default-features --features libm,alloc"
           # No allocator: integration tests need `alloc` and are skipped.
           - "--no-default-features --features libm"

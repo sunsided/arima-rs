@@ -25,6 +25,8 @@ Phase 3 (exogenous regressors) is done: the ARIMA part models `u = y - X beta`, 
 
 Phase 4 (diagnostics) is done: Ljung–Box, Jarque–Bera and KPSS match statsmodels to 1e-9 including p-values, through an in-crate regularised incomplete gamma (Numerical Recipes 3e §6.2) and Lanczos log-gamma. `ndiffs` uses KPSS with statsmodels' "legacy" lag rule, since R is not available here to pin `forecast::ndiffs`' own lag choice.
 
+Phase 5 (auto-ARIMA) is done. The stepwise search follows R's `auto.arima` (start models, move order, the constant only for `d + D <= 1`, the 0.99 inverse-root check) and picks the same orders as pmdarima 2.1.1 on eight simulated series with `d` and `D` fixed; pmdarima also served as the reference that R was meant to be. `ndiffs` uses the short KPSS lag rule and agrees with pmdarima's `ndiffs`. `nsdiffs` uses STL seasonal strength, R's default, with a port of the STL Fortran that matches statsmodels to 1e-9; pmdarima's OCSB test missed the seasonal unit root of a simulated airline series. The `rayon` feature parallelises the exhaustive search only, since the stepwise search is sequential by design.
+
 Phase 1 is complete with step 6. Two conventions differ from statsmodels' defaults on purpose and are documented in the code: the likelihood for `d > 0` uses simple differencing (as R does), and BIC and AICc count only non-missing values (as R does).
 
 Reference vectors come from `scripts/generate_reference.py`. Every quoted number in this document must be regenerated from the series in that script before a test uses it.

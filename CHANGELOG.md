@@ -16,6 +16,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `ArimaSpec::capacity()`: the smallest `R` a `Filter` needs, regressors included.
 - Diagnostics: `ljung_box`, `jarque_bera`, `kpss` (with `KpssNull` and `kpss_lags`) returning `TestResult`, all
   heap-free, and `ndiffs` to choose the differencing order.
+- `AutoArima`: the Hyndman–Khandakar stepwise search of R's `auto.arima` (or an exhaustive search), returning
+  `AutoFit`; `Criterion` picks AICc, AIC or BIC. `nsdiffs` chooses `D` by STL seasonal strength.
+- `stl` and `Decomposition`: STL decomposition matching statsmodels' `STL`, with `seasonal_strength`.
+- `kpss_short_lags`; `ndiffs` now uses it (as pmdarima and R's tseries do), which gives KPSS more power on short
+  series.
+- The `rayon` feature fits the candidates of an exhaustive `AutoArima` search in parallel.
 
 ### Changed
 
