@@ -145,3 +145,25 @@ fn forecasts_match_statsmodels() {
         }
     }
 }
+
+#[test]
+fn intervals_match_statsmodels_conf_int() {
+    for case in ALL {
+        let mut streaming = filter(case);
+        streaming.warm_up(case.values);
+
+        let horizon = case.forecast_mean.len();
+        for (level, lower_expected, upper_expected) in [
+            (0.8, case.forecast_lower_80, case.forecast_upper_80),
+            (0.95, case.forecast_lower_95, case.forecast_upper_95),
+        ] {
+            let (mut mean, mut lower, mut upper) =
+                (vec![0.0; horizon], vec![0.0; horizon], vec![0.0; horizon]);
+            streaming.forecast_interval_into(level, &mut mean, &mut lower, &mut upper);
+            for h in 0..horizon {
+                assert_close("lower", h, lower[h], lower_expected[h]);
+                assert_close("upper", h, upper[h], upper_expected[h]);
+            }
+        }
+    }
+}

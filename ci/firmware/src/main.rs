@@ -34,7 +34,9 @@ pub extern "C" fn _start() -> ! {
         let innovation = filter.update(core::hint::black_box(2.5));
         let (mut mean, mut variance) = ([0.0; 3], [0.0; 3]);
         filter.forecast_into(&mut mean, &mut variance);
-        core::hint::black_box((innovation, mean, variance));
+        let (mut lower, mut upper) = ([0.0; 3], [0.0; 3]);
+        filter.forecast_interval_into(0.95, &mut mean, &mut lower, &mut upper);
+        core::hint::black_box((innovation, mean, variance, lower, upper));
     }
 
     loop {}

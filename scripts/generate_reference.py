@@ -220,6 +220,10 @@ def arma_case(index, name, doc, ar, d, ma, mean, sigma2, missing):
         "extend_variances": extended.filter_results.forecasts_error_cov[0, 0],
         "forecast_mean": forecast.predicted_mean,
         "forecast_variance": forecast.var_pred_mean,
+        "forecast_lower_80": forecast.conf_int(alpha=0.2)[:, 0],
+        "forecast_upper_80": forecast.conf_int(alpha=0.2)[:, 1],
+        "forecast_lower_95": forecast.conf_int(alpha=0.05)[:, 0],
+        "forecast_upper_95": forecast.conf_int(alpha=0.05)[:, 1],
     }
     arrays |= {
         "fit_ar": [fit_params[f"ar.L{i + 1}"] for i in range(len(ar))],
@@ -241,6 +245,9 @@ def arma_case(index, name, doc, ar, d, ma, mean, sigma2, missing):
         f"    fit_mean: {rust_float(fit_params.get('const', 0.0))},",
         f"    fit_sigma2: {rust_float(fit_params['sigma2'])},",
         f"    fit_loglike: {rust_float(fit.llf)},",
+        f"    fit_aic: {rust_float(fit.aic)},",
+        f"    fit_aicc: {rust_float(fit.aicc)},",
+        f"    fit_bic: {rust_float(fit.bic)},",
         f"    d: {d},",
         f"    mean: {rust_float(mean)},",
         f"    sigma2: {rust_float(sigma2)},",
@@ -307,6 +314,20 @@ pub struct ArmaCase {{
     pub fit_sigma2: f64,
     /// `llf` of the same fit.
     pub fit_loglike: f64,
+    /// `aic` of the same fit.
+    pub fit_aic: f64,
+    /// `aicc` of the same fit. statsmodels counts missing values in `n`.
+    pub fit_aicc: f64,
+    /// `bic` of the same fit. statsmodels counts missing values in `n`.
+    pub fit_bic: f64,
+    /// `get_forecast(...).conf_int(alpha=0.2)[:, 0]`: lower 80% bounds.
+    pub forecast_lower_80: &'static [f64],
+    /// Upper 80% bounds.
+    pub forecast_upper_80: &'static [f64],
+    /// `get_forecast(...).conf_int(alpha=0.05)[:, 0]`: lower 95% bounds.
+    pub forecast_lower_95: &'static [f64],
+    /// Upper 95% bounds.
+    pub forecast_upper_95: &'static [f64],
 }}
 
 /// All ARMA reference cases.

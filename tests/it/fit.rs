@@ -71,3 +71,42 @@ fn fit_reaches_the_statsmodels_maximum() {
         assert!(sigma2_error <= PARAMETER_TOLERANCE, "{context}: sigma2");
     }
 }
+
+#[test]
+fn information_criteria_match_statsmodels() {
+    for (index, case) in ALL.iter().enumerate() {
+        let model = Arima::new(case.ar.len(), case.d, case.ma.len()).mean(case.fit_with_mean);
+        let fitted = model.fit(case.values).unwrap();
+
+        // Our llf sits up to about 1e-7 above statsmodels', so the criteria may differ by twice that.
+        let close = |actual: f64, expected: f64| (actual - expected).abs() <= 1e-6;
+        assert!(
+            close(fitted.aic(), case.fit_aic),
+            "case {index}: aic {} vs {}",
+            fitted.aic(),
+            case.fit_aic
+        );
+
+        // statsmodels counts missing values in n; this crate, like R, does not.
+        if case.values.iter().any(|v| v.is_nan()) {
+            assert!(
+                fitted.bic() < case.fit_bic,
+                "case {index}: fewer observations, smaller penalty"
+            );
+            continue;
+        }
+
+        assert!(
+            close(fitted.aicc(), case.fit_aicc),
+            "case {index}: aicc {} vs {}",
+            fitted.aicc(),
+            case.fit_aicc
+        );
+        assert!(
+            close(fitted.bic(), case.fit_bic),
+            "case {index}: bic {} vs {}",
+            fitted.bic(),
+            case.fit_bic
+        );
+    }
+}
