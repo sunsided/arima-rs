@@ -68,6 +68,12 @@ fn main() {
     exog_filter.forecast_exog_into(&[0.0, 1.0, 1.0, 0.0], &mut exog_mean, &mut exog_variance);
     std::hint::black_box((&exog_mean, &exog_variance));
 
+    std::hint::black_box((
+        backshift::ljung_box(&history, 3, 1),
+        backshift::jarque_bera(&history),
+        backshift::kpss(&history, backshift::KpssNull::Level, 2),
+    ));
+
     let after = ALLOCATIONS.load(Ordering::SeqCst);
     std::hint::black_box((&mean, &variance, &lower, &upper));
     assert_eq!(

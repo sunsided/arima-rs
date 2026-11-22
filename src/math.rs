@@ -30,3 +30,17 @@ pub(crate) fn ln(x: f64) -> f64 {
 pub(crate) fn ln(x: f64) -> f64 {
     libm::log(x)
 }
+
+/// `e^x`.
+#[cfg(feature = "std")]
+#[inline]
+pub(crate) fn exp(x: f64) -> f64 {
+    x.exp()
+}
+
+/// `e^x`.
+#[cfg(all(not(feature = "std"), feature = "libm"))]
+#[inline]
+pub(crate) fn exp(x: f64) -> f64 {
+    libm::exp(x)
+}
