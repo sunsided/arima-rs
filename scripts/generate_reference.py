@@ -144,6 +144,26 @@ SEASONAL_CASES = [
 
 NO_SEASON = ([], 0, [], 0)
 
+# Regression with ARIMA errors: the same fields plus the seasonal part and beta.
+EXOG_CASES = [
+    ("EXOG_MEAN", "ARIMA(1, 0, 0) with mean 3 and two regressors (noise and a trend).", [0.5], 0, [], 3.0, 1.0, None, NO_SEASON, [1.5, -2.0]),
+    ("EXOG_I1", "ARIMA(1, 1, 0) with one regressor.", [0.4], 1, [], 0.0, 1.0, None, NO_SEASON, [1.5]),
+    ("EXOG_AIRLINE4", "ARIMA(0, 1, 1)(0, 1, 1, 4) with one regressor.", [], 1, [-0.4], 0.0, 1.0, None, ([], 1, [-0.6], 4), [0.8]),
+]
+
+
+def regressors(beta, seed, rows, offset):
+    """`rows` regressor rows for `beta`: standard normal columns, the second one a trend.
+
+    The trend runs from 0 to 1 over the history and the forecast horizon together;
+    `offset` is the index of the first row on it.
+    """
+    rng = np.random.default_rng(seed)
+    x = rng.standard_normal((rows, len(beta)))
+    if len(beta) >= 2:
+        x[:, 1] = np.linspace(0.0, 1.0, ARMA_LENGTH + ARMA_HORIZON)[offset : offset + rows]
+    return x
+
 
 def seasonal_series(ar, d, ma, mean, sigma2, seed, seasonal):
     """Simulate ARMA_LENGTH raw values of a seasonal ARIMA model.
@@ -233,18 +253,18 @@ def exact_extend(head, tail, order, params, seasonal_order=(0, 0, 0, 0)):
     return exact_filter(model, params)
 
 
-def forecast_model(y, ar, d, ma, mean, seasonal):
+def forecast_model(y, ar, d, ma, mean, seasonal, x=None):
     """The statsmodels model whose forecasts are on the original scale, with its trend parameters."""
     sar, seasonal_d, sma, s = seasonal
     order = (len(ar), d, len(ma))
     seasonal_order = (len(sar), seasonal_d, len(sma), s)
     if mean == 0.0:
-        return SARIMAX(y, order=order, seasonal_order=seasonal_order, trend="n"), []
+        return SARIMAX(y, exog=x, order=order, seasonal_order=seasonal_order, trend="n"), []
     trend = {0: "c", 1: "t"}[d]
-    return ARIMA(y, order=order, seasonal_order=seasonal_order, trend=trend), [mean]
+    return ARIMA(y, exog=x, order=order, seasonal_order=seasonal_order, trend=trend), [mean]
 
 
-def arma_case(index, name, doc, ar, d, ma, mean, sigma2, missing, seasonal=NO_SEASON):
+def arma_case(index, name, doc, ar, d, ma, mean, sigma2, missing, seasonal=NO_SEASON, beta=()):
     """Render one `ArmaCase` constant from statsmodels filters at fixed parameters.
 
     Innovations and the likelihood come from SARIMAX on `diff(y, d) - mean` (simple
@@ -255,10 +275,14 @@ def arma_case(index, name, doc, ar, d, ma, mean, sigma2, missing, seasonal=NO_SE
         y = arima_series(ar, d, ma, mean, sigma2, seed=100 + index)
     else:
         y = seasonal_series(ar, d, ma, mean, sigma2, 100 + index, seasonal)
+    beta = np.array(beta, float)
+    x = regressors(beta, 1000 + index, ARMA_LENGTH, 0)
+    future_x = regressors(beta, 2000 + index, ARMA_HORIZON, ARMA_LENGTH)
+    y = y + x @ beta
     if missing is not None:
         y[missing] = np.nan
     k = d + seasonal_d * s
-    raw_w = simple_difference(y, d, seasonal_d, s)
+    raw_w = simple_difference(y - x @ beta, d, seasonal_d, s)
     w = raw_w - mean
     order = (len(ar), 0, len(ma))
     stationary_seasonal = (len(sar), 0, len(sma), s)
@@ -272,11 +296,15 @@ def arma_case(index, name, doc, ar, d, ma, mean, sigma2, missing, seasonal=NO_SE
     extended = exact_extend(head, w[ARMA_SPLIT - k :], order, params, stationary_seasonal)
 
     fit_with_mean = (d == 0 and seasonal_d == 0) or mean != 0.0
-    fit = ARIMA(raw_w, order=order, seasonal_order=stationary_seasonal, trend="c" if fit_with_mean else "n").fit()
+    raw_y = simple_difference(y, d, seasonal_d, s)
+    raw_x = np.column_stack([simple_difference(x[:, j], d, seasonal_d, s) for j in range(len(beta))]) if len(beta) else None
+    fit = ARIMA(raw_y, exog=raw_x, order=order, seasonal_order=stationary_seasonal, trend="c" if fit_with_mean else "n").fit()
     fit_params = dict(zip(fit.model.param_names, fit.params))
 
-    model, trend_params = forecast_model(y, ar, d, ma, mean, seasonal)
-    forecast = exact_filter(model, [*trend_params, *params]).get_forecast(ARMA_HORIZON)
+    exog = x if len(beta) else None
+    model, trend_params = forecast_model(y, ar, d, ma, mean, seasonal, exog)
+    filtered = exact_filter(model, [*trend_params, *beta, *params])
+    forecast = filtered.get_forecast(ARMA_HORIZON, exog=future_x if len(beta) else None)
 
     arrays = {
         "ar": ar,
@@ -300,8 +328,12 @@ def arma_case(index, name, doc, ar, d, ma, mean, sigma2, missing, seasonal=NO_SE
         "seasonal_ma": sma,
         "fit_seasonal_ar": [fit_params[f"ar.S.L{(i + 1) * s}"] for i in range(len(sar))],
         "fit_seasonal_ma": [fit_params[f"ma.S.L{(i + 1) * s}"] for i in range(len(sma))],
+        "exog": beta,
+        "regressors": x.ravel(),
+        "future_regressors": future_x.ravel(),
+        "fit_exog": [fit_params[f"x{j + 1}"] for j in range(len(beta))],
     }
-    if np.isnan(raw_w).any() or seasonal != NO_SEASON:
+    if np.isnan(raw_w).any() or seasonal != NO_SEASON or len(beta):
         hr_lines = ["    hannan_rissanen: None,"]
     else:
         centered = raw_w - (raw_w.mean() if fit_with_mean else 0.0)
@@ -394,6 +426,14 @@ pub struct ArmaCase {{
     pub fit_seasonal_ar: &'static [f64],
     /// Seasonal MA estimates of the same fit.
     pub fit_seasonal_ma: &'static [f64],
+    /// Regression coefficients; empty without regressors.
+    pub exog: &'static [f64],
+    /// One row of `exog.len()` regressors per value, row-major.
+    pub regressors: &'static [f64],
+    /// The regressor rows of the forecast horizon, row-major.
+    pub future_regressors: &'static [f64],
+    /// Regression estimates of the fit, on the differenced regressors.
+    pub fit_exog: &'static [f64],
     /// The `const` estimate of the same fit, or 0.
     pub fit_mean: f64,
     /// The `sigma2` estimate of the same fit.
@@ -417,9 +457,9 @@ pub struct ArmaCase {{
 }}
 
 /// All ARMA reference cases.
-pub const ALL: &[&ArmaCase] = &[{", ".join(f"&{case[0]}" for case in ARMA_CASES + SEASONAL_CASES)}];
+pub const ALL: &[&ArmaCase] = &[{", ".join(f"&{case[0]}" for case in ARMA_CASES + SEASONAL_CASES + EXOG_CASES)}];
 '''
-    cases = ARMA_CASES + SEASONAL_CASES
+    cases = ARMA_CASES + SEASONAL_CASES + EXOG_CASES
     body = "\n\n".join(arma_case(i, *case) for i, case in enumerate(cases))
     ARMA_OUTPUT.write_text(header + "\n" + body + "\n")
 

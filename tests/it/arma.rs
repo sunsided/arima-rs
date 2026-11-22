@@ -1,7 +1,7 @@
 //! Checks the ARMA filter and likelihood against the statsmodels vectors in [`crate::arma_data`].
 
 use crate::arma_data::{ALL, ArmaCase, SPLIT};
-use backshift::{ArimaSpec, Filter, Innovation, Seasonal, innovations, loglike};
+use backshift::{ArimaSpec, Filter, Innovation, Seasonal, innovations_exog, loglike_exog};
 
 /// Relative tolerance against statsmodels.
 const TOLERANCE: f64 = 1e-9;
@@ -49,9 +49,16 @@ fn spec(case: &ArmaCase) -> ArimaSpec<'static> {
             ma: case.seasonal_ma,
             period: case.period,
         },
+        exog: case.exog,
         mean: case.mean,
         sigma2: case.sigma2,
     }
+}
+
+/// The regressor row that goes with value `t` of a case.
+fn row(case: &ArmaCase, t: usize) -> &'static [f64] {
+    let m = case.exog.len();
+    &case.regressors[t * m..(t + 1) * m]
 }
 
 /// A fixed-size filter at the stationary start of a case's model.
@@ -65,7 +72,7 @@ fn loglike_matches_statsmodels() {
         assert_close(
             "loglike",
             0,
-            loglike(case.values, &spec(case)).unwrap(),
+            loglike_exog(case.values, case.regressors, &spec(case)).unwrap(),
             case.loglike,
         );
     }
@@ -74,7 +81,7 @@ fn loglike_matches_statsmodels() {
 #[test]
 fn innovations_match_statsmodels() {
     for case in ALL {
-        let result = innovations(case.values, &spec(case)).unwrap();
+        let result = innovations_exog(case.values, case.regressors, &spec(case)).unwrap();
         assert_innovations(
             "innovations",
             &result,
@@ -87,12 +94,13 @@ fn innovations_match_statsmodels() {
 #[test]
 fn fixed_filter_equals_runtime_path_bit_for_bit() {
     for case in ALL {
-        let runtime = innovations(case.values, &spec(case)).unwrap();
+        let runtime = innovations_exog(case.values, case.regressors, &spec(case)).unwrap();
         let mut fixed = filter(case);
         let streamed: Vec<Innovation> = case
             .values
             .iter()
-            .filter_map(|&y| fixed.update(y))
+            .enumerate()
+            .filter_map(|(t, &y)| fixed.update_exog(y, row(case, t)))
             .collect();
         assert_eq!(
             streamed.len(),
@@ -118,12 +126,12 @@ fn fixed_filter_equals_runtime_path_bit_for_bit() {
 fn streaming_matches_statsmodels_extend() {
     for case in ALL {
         let mut streaming = filter(case);
-        streaming.warm_up(&case.values[..SPLIT]);
-        let tail: Vec<Innovation> = case.values[SPLIT..]
-            .iter()
-            .map(|&y| {
+        let m = case.exog.len();
+        streaming.warm_up_exog(&case.values[..SPLIT], &case.regressors[..SPLIT * m]);
+        let tail: Vec<Innovation> = (SPLIT..case.values.len())
+            .map(|t| {
                 streaming
-                    .update(y)
+                    .update_exog(case.values[t], row(case, t))
                     .expect("SPLIT > d, so differencing is primed")
             })
             .collect();
@@ -135,11 +143,11 @@ fn streaming_matches_statsmodels_extend() {
 fn forecasts_match_statsmodels() {
     for case in ALL {
         let mut streaming = filter(case);
-        streaming.warm_up(case.values);
+        streaming.warm_up_exog(case.values, case.regressors);
 
         let horizon = case.forecast_mean.len();
         let (mut mean, mut variance) = (vec![0.0; horizon], vec![0.0; horizon]);
-        streaming.forecast_into(&mut mean, &mut variance);
+        streaming.forecast_exog_into(case.future_regressors, &mut mean, &mut variance);
         for h in 0..horizon {
             assert_close("forecast mean", h, mean[h], case.forecast_mean[h]);
             assert_close(
@@ -156,7 +164,7 @@ fn forecasts_match_statsmodels() {
 fn intervals_match_statsmodels_conf_int() {
     for case in ALL {
         let mut streaming = filter(case);
-        streaming.warm_up(case.values);
+        streaming.warm_up_exog(case.values, case.regressors);
 
         let horizon = case.forecast_mean.len();
         for (level, lower_expected, upper_expected) in [
@@ -165,7 +173,13 @@ fn intervals_match_statsmodels_conf_int() {
         ] {
             let (mut mean, mut lower, mut upper) =
                 (vec![0.0; horizon], vec![0.0; horizon], vec![0.0; horizon]);
-            streaming.forecast_interval_into(level, &mut mean, &mut lower, &mut upper);
+            streaming.forecast_interval_exog_into(
+                level,
+                case.future_regressors,
+                &mut mean,
+                &mut lower,
+                &mut upper,
+            );
             for h in 0..horizon {
                 assert_close("lower", h, lower[h], lower_expected[h]);
                 assert_close("upper", h, upper[h], upper_expected[h]);

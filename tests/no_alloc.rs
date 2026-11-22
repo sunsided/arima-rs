@@ -56,6 +56,18 @@ fn main() {
     let (mut lower, mut upper) = ([0.0; 6], [0.0; 6]);
     filter.forecast_interval_into(0.95, &mut mean, &mut lower, &mut upper);
 
+    let exog_spec = ArimaSpec {
+        ar: &[0.6],
+        exog: &[1.5, -0.5],
+        ..ArimaSpec::default()
+    };
+    let mut exog_filter = Filter::<4>::new(&exog_spec).expect("stationary model");
+    exog_filter.warm_up_exog(&history[..2], &[0.1, 0.2, 0.3, 0.4]);
+    std::hint::black_box(exog_filter.update_exog(0.5, &[1.0, -1.0]));
+    let (mut exog_mean, mut exog_variance) = ([0.0; 2], [0.0; 2]);
+    exog_filter.forecast_exog_into(&[0.0, 1.0, 1.0, 0.0], &mut exog_mean, &mut exog_variance);
+    std::hint::black_box((&exog_mean, &exog_variance));
+
     let after = ALLOCATIONS.load(Ordering::SeqCst);
     std::hint::black_box((&mean, &variance, &lower, &upper));
     assert_eq!(

@@ -112,7 +112,7 @@ fn lags(x: &[f64], t: usize, k: usize) -> Vec<f64> {
 /// Ordinary least squares: the `b` that minimises `|y - X b|`, from the normal
 /// equations `X'X b = X'y` solved by Cholesky. [`None`] if `X'X` is not positive definite
 /// or there are no more rows than columns.
-fn least_squares(rows: &[Vec<f64>], y: &[f64]) -> Option<Vec<f64>> {
+pub(crate) fn least_squares(rows: &[Vec<f64>], y: &[f64]) -> Option<Vec<f64>> {
     let k = rows.first()?.len();
     if rows.len() <= k {
         return None;

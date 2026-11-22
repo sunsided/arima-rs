@@ -22,8 +22,31 @@ use alloc::vec::Vec;
 ///
 /// [`FilterError::InvalidParameter`] or [`FilterError::NonStationary`], as for
 /// [`Filter::new`](crate::Filter::new). There is no capacity limit.
+///
+/// # Panics
+///
+/// Panics if the model has regressors; use [`innovations_exog`] then.
 pub fn innovations(y: &[f64], spec: &ArimaSpec<'_>) -> Result<Vec<Innovation>, FilterError> {
-    let w = demeaned_difference(y, spec);
+    innovations_exog(y, &[], spec)
+}
+
+/// Like [`innovations`], for a model with regressors: `regressors` holds one row of
+/// `spec.exog.len()` values per observation, row-major, and the ARIMA part models
+/// `y - x . beta`. Matches statsmodels `ARIMA(y, exog=X, ...)` with simple differencing.
+///
+/// # Errors
+///
+/// As for [`innovations`].
+///
+/// # Panics
+///
+/// Panics if `regressors` does not hold `y.len()` rows of `spec.exog.len()` values.
+pub fn innovations_exog(
+    y: &[f64],
+    regressors: &[f64],
+    spec: &ArimaSpec<'_>,
+) -> Result<Vec<Innovation>, FilterError> {
+    let w = demeaned_difference(&regressed(y, regressors, spec.exog), spec);
     let mut result = Vec::with_capacity(w.len());
     Workspace::new(spec)?.run(&w, |innovation| result.push(innovation));
 
@@ -44,6 +67,10 @@ pub fn innovations(y: &[f64], spec: &ArimaSpec<'_>) -> Result<Vec<Innovation>, F
 ///
 /// As for [`innovations`].
 ///
+/// # Panics
+///
+/// Panics if the model has regressors; use [`loglike_exog`] then.
+///
 /// # Examples
 ///
 /// ```
@@ -55,7 +82,24 @@ pub fn innovations(y: &[f64], spec: &ArimaSpec<'_>) -> Result<Vec<Innovation>, F
 /// assert!((llf + std::f64::consts::TAU.ln()).abs() < 1e-12);
 /// ```
 pub fn loglike(y: &[f64], spec: &ArimaSpec<'_>) -> Result<f64, FilterError> {
-    let w = demeaned_difference(y, spec);
+    loglike_exog(y, &[], spec)
+}
+
+/// Like [`loglike`], for a model with regressors; `regressors` as in [`innovations_exog`].
+///
+/// # Errors
+///
+/// As for [`innovations`].
+///
+/// # Panics
+///
+/// Panics if `regressors` does not hold `y.len()` rows of `spec.exog.len()` values.
+pub fn loglike_exog(
+    y: &[f64],
+    regressors: &[f64],
+    spec: &ArimaSpec<'_>,
+) -> Result<f64, FilterError> {
+    let w = demeaned_difference(&regressed(y, regressors, spec.exog), spec);
     let ln_two_pi = math::ln(core::f64::consts::TAU);
     let mut sum = 0.0;
     Workspace::new(spec)?.run(&w, |Innovation { value, variance }| {
@@ -102,6 +146,27 @@ pub(crate) fn concentrated(w: &[f64], shape: &ArimaSpec<'_>) -> Option<(f64, f64
         -0.5 * (n * (math::ln(core::f64::consts::TAU) + 1.0 + math::ln(sigma2)) + log_variances);
 
     Some((llf, sigma2, count))
+}
+
+/// `u_t = y_t - x_t . beta`, with the same arithmetic as [`Filter`](crate::Filter).
+///
+/// # Panics
+///
+/// Panics if `regressors` does not hold `y.len()` rows of `beta.len()` values.
+pub(crate) fn regressed(y: &[f64], regressors: &[f64], beta: &[f64]) -> Vec<f64> {
+    let m = beta.len();
+    assert_eq!(
+        regressors.len(),
+        y.len() * m,
+        "one regressor row per observation"
+    );
+    y.iter()
+        .enumerate()
+        .map(|(t, &value)| {
+            let row = &regressors[t * m..(t + 1) * m];
+            value - row.iter().zip(beta).map(|(x, b)| x * b).sum::<f64>()
+        })
+        .collect()
 }
 
 /// `(1 - B)^d (1 - B^s)^D y - mean`: the series the ARMA part models.

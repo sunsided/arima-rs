@@ -54,6 +54,11 @@ pub struct ArimaSpec<'a> {
     pub ma: &'a [f64],
     /// The seasonal part; [`Seasonal::NONE`] for a non-seasonal model.
     pub seasonal: Seasonal<'a>,
+    /// Regression coefficients `beta` for exogenous regressors; empty for none.
+    ///
+    /// The ARIMA part then models `u_t = y_t - x_t . beta` instead of `y_t`, so each
+    /// observation needs a row `x_t` of `exog.len()` regressors.
+    pub exog: &'a [f64],
     /// The mean of the differenced series: the mean for `d = D = 0`, the drift for `d = 1, D = 0`.
     pub mean: f64,
     /// The innovation variance. Must be positive and finite.
@@ -104,6 +109,7 @@ impl Default for ArimaSpec<'_> {
             d: 0,
             ma: &[],
             seasonal: Seasonal::NONE,
+            exog: &[],
             mean: 0.0,
             sigma2: 1.0,
         }
@@ -140,7 +146,8 @@ impl ArimaSpec<'_> {
             .iter()
             .chain(self.ma)
             .chain(seasonal.ar)
-            .chain(seasonal.ma);
+            .chain(seasonal.ma)
+            .chain(self.exog);
         let finite = coefficients.copied().all(f64::is_finite);
         let period_ok = seasonal.is_empty() || seasonal.period > 0;
         if !finite
@@ -187,6 +194,13 @@ pub enum FilterError {
     /// The AR part is not stationary, so the model has no unconditional covariance
     /// to start from.
     NonStationary,
+    /// The model has more regression coefficients than the filter's capacity `R`.
+    Regressors {
+        /// The number of regression coefficients, `exog.len()`.
+        needed: usize,
+        /// The filter's capacity `R`.
+        capacity: usize,
+    },
 }
 
 impl Display for FilterError {
@@ -202,6 +216,9 @@ impl Display for FilterError {
                 )
             }
             FilterError::NonStationary => write!(f, "the AR part is not stationary"),
+            FilterError::Regressors { needed, capacity } => {
+                write!(f, "model has {needed} regressors, filter holds {capacity}")
+            }
         }
     }
 }
@@ -256,6 +273,10 @@ pub struct Filter<const R: usize> {
     mean: f64,
     /// How many raw values were fed, capped at `k + 1`. Values beyond `k` produce innovations.
     seen: usize,
+    /// The regression coefficients; the first `m` entries are used.
+    beta: [f64; R],
+    /// The number of regressors.
+    m: usize,
 }
 
 impl<const R: usize> Filter<R> {
@@ -278,6 +299,13 @@ impl<const R: usize> Filter<R> {
             });
         }
 
+        if spec.exog.len() > R {
+            return Err(FilterError::Regressors {
+                needed: spec.exog.len(),
+                capacity: R,
+            });
+        }
+
         let mut filter = Self {
             r: spec.arma_states(),
             k: spec.differencing_order(),
@@ -290,7 +318,10 @@ impl<const R: usize> Filter<R> {
             lags: [0.0; R],
             mean: spec.mean,
             seen: 0,
+            beta: [0.0; R],
+            m: spec.exog.len(),
         };
+        filter.beta[..filter.m].copy_from_slice(spec.exog);
         spec.expand_into(&mut filter.phi, &mut filter.selection, &mut filter.delta);
 
         let (mut power, mut product, mut term) = ([[0.0; R]; R], [[0.0; R]; R], [[0.0; R]; R]);
@@ -314,8 +345,23 @@ impl<const R: usize> Filter<R> {
     /// differencing. A `NaN` observation counts as missing, as in statsmodels: its
     /// innovation value is `NaN` and the filter only moves forward in time. A missing
     /// value also makes every difference that uses it missing.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the model has regressors; use [`Filter::update_exog`] then.
     pub fn update(&mut self, y: f64) -> Option<Innovation> {
-        let w = self.difference(y)? - self.mean;
+        self.update_exog(y, &[])
+    }
+
+    /// Like [`Filter::update`], for a model with regressors: `x` is the regressor row
+    /// that goes with `y`, and the filter works on `y - x . beta`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `x` does not have one entry per regression coefficient.
+    pub fn update_exog(&mut self, y: f64, x: &[f64]) -> Option<Innovation> {
+        let u = y - self.regression(x);
+        let w = self.difference(u)? - self.mean;
 
         let r = self.r;
         let mut scratch = [0.0; R];
@@ -327,9 +373,28 @@ impl<const R: usize> Filter<R> {
     }
 
     /// Feeds every value of `history` in order, discarding the innovations.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the model has regressors; use [`Filter::warm_up_exog`] then.
     pub fn warm_up(&mut self, history: &[f64]) {
-        for &y in history {
-            self.update(y);
+        self.warm_up_exog(history, &[]);
+    }
+
+    /// Like [`Filter::warm_up`], for a model with regressors. `regressors` holds one row
+    /// per value of `history`, row-major.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `regressors` does not hold `history.len()` rows of `exog.len()` entries.
+    pub fn warm_up_exog(&mut self, history: &[f64], regressors: &[f64]) {
+        assert_eq!(
+            regressors.len(),
+            history.len() * self.m,
+            "one regressor row per value"
+        );
+        for (t, &y) in history.iter().enumerate() {
+            self.update_exog(y, &regressors[t * self.m..(t + 1) * self.m]);
         }
     }
 
@@ -341,12 +406,30 @@ impl<const R: usize> Filter<R> {
     ///
     /// # Panics
     ///
-    /// Panics if `mean` and `variance` have different lengths.
+    /// Panics if `mean` and `variance` have different lengths, or the model has
+    /// regressors (use [`Filter::forecast_exog_into`] then).
     pub fn forecast_into(&self, mean: &mut [f64], variance: &mut [f64]) {
+        self.forecast_exog_into(&[], mean, variance);
+    }
+
+    /// Like [`Filter::forecast_into`], for a model with regressors: `future` holds the
+    /// regressor rows of the forecast horizon, row-major, and `x . beta` is added to each
+    /// mean. The variances treat `beta` as known.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `mean` and `variance` have different lengths, or `future` does not hold
+    /// `mean.len()` rows of `exog.len()` entries.
+    pub fn forecast_exog_into(&self, future: &[f64], mean: &mut [f64], variance: &mut [f64]) {
         assert_eq!(
             mean.len(),
             variance.len(),
             "mean and variance must have the same length"
+        );
+        assert_eq!(
+            future.len(),
+            mean.len() * self.m,
+            "one regressor row per horizon"
         );
         if self.seen < self.k {
             mean.fill(f64::NAN);
@@ -355,6 +438,9 @@ impl<const R: usize> Filter<R> {
         }
 
         Forecast::start(self).run(mean, variance);
+        for (h, value) in mean.iter_mut().enumerate() {
+            *value += self.regression(&future[h * self.m..(h + 1) * self.m]);
+        }
     }
 
     /// Forecasts the next `mean.len()` raw values with central prediction intervals.
@@ -366,7 +452,8 @@ impl<const R: usize> Filter<R> {
     ///
     /// # Panics
     ///
-    /// Panics if `mean`, `lower` and `upper` do not all have the same length.
+    /// Panics if `mean`, `lower` and `upper` do not all have the same length, or the model
+    /// has regressors (use [`Filter::forecast_interval_exog_into`] then).
     ///
     /// # Examples
     ///
@@ -388,19 +475,47 @@ impl<const R: usize> Filter<R> {
         lower: &mut [f64],
         upper: &mut [f64],
     ) {
+        self.forecast_interval_exog_into(level, &[], mean, lower, upper);
+    }
+
+    /// Like [`Filter::forecast_interval_into`], for a model with regressors; `future` as
+    /// in [`Filter::forecast_exog_into`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `mean`, `lower` and `upper` do not all have the same length, or `future`
+    /// does not hold `mean.len()` rows of `exog.len()` entries.
+    pub fn forecast_interval_exog_into(
+        &self,
+        level: f64,
+        future: &[f64],
+        mean: &mut [f64],
+        lower: &mut [f64],
+        upper: &mut [f64],
+    ) {
         assert!(
             mean.len() == lower.len() && mean.len() == upper.len(),
             "mean, lower and upper must have the same length"
         );
 
         // `upper` holds the variances until it is overwritten below.
-        self.forecast_into(mean, upper);
+        self.forecast_exog_into(future, mean, upper);
         let z = normal_quantile(f64::midpoint(1.0, level));
         for ((m, lo), up) in mean.iter().zip(lower.iter_mut()).zip(upper.iter_mut()) {
             let half_width = z * math::sqrt(*up);
             *lo = m - half_width;
             *up = m + half_width;
         }
+    }
+
+    /// `x . beta` for one regressor row.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `x` does not have one entry per regression coefficient.
+    fn regression(&self, x: &[f64]) -> f64 {
+        assert_eq!(x.len(), self.m, "one regressor per regression coefficient");
+        x.iter().zip(&self.beta[..self.m]).map(|(x, b)| x * b).sum()
     }
 
     /// Applies the differencing polynomial to `y` and its stored lags, then stores `y`.
@@ -741,5 +856,63 @@ mod tests {
             })
         );
         assert!(Filter::<3>::new(&spec).is_ok());
+    }
+
+    #[test]
+    fn regressors_are_subtracted_before_differencing() {
+        let beta = [2.0, -1.0];
+        let spec = ArimaSpec {
+            ar: &[0.5],
+            d: 1,
+            exog: &beta,
+            ..ArimaSpec::default()
+        };
+        let plain_spec = ArimaSpec { exog: &[], ..spec };
+        let mut with_exog = Filter::<4>::new(&spec).unwrap();
+        let mut plain = Filter::<4>::new(&plain_spec).unwrap();
+
+        let rows = [[1.0, 0.5], [0.2, 0.1], [-0.3, 0.9]];
+        for (y, x) in [3.0, 2.5, 1.0].into_iter().zip(rows) {
+            let u = y - (x[0] * beta[0] + x[1] * beta[1]);
+            assert_eq!(with_exog.update_exog(y, &x), plain.update(u));
+        }
+
+        let future = [0.4, 0.2];
+        let (mut mean, mut variance) = ([0.0; 1], [0.0; 1]);
+        let (mut plain_mean, mut plain_variance) = ([0.0; 1], [0.0; 1]);
+        with_exog.forecast_exog_into(&future, &mut mean, &mut variance);
+        plain.forecast_into(&mut plain_mean, &mut plain_variance);
+        assert_approx_eq!(
+            f64,
+            mean[0],
+            plain_mean[0] + 0.4 * 2.0 - 0.2,
+            epsilon = 1e-12
+        );
+        assert_eq!(variance, plain_variance);
+    }
+
+    #[test]
+    #[should_panic(expected = "one regressor per regression coefficient")]
+    fn update_without_regressors_panics_for_exog_models() {
+        let spec = ArimaSpec {
+            exog: &[1.0],
+            ..ArimaSpec::default()
+        };
+        Filter::<2>::new(&spec).unwrap().update(1.0);
+    }
+
+    #[test]
+    fn too_many_regressors() {
+        let spec = ArimaSpec {
+            exog: &[1.0, 2.0, 3.0],
+            ..ArimaSpec::default()
+        };
+        assert_eq!(
+            Filter::<2>::new(&spec).err(),
+            Some(FilterError::Regressors {
+                needed: 3,
+                capacity: 2
+            })
+        );
     }
 }

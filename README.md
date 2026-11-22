@@ -33,8 +33,8 @@ or in a Rust service that would rather not link BLAS. The streaming filter is th
 costs one Kalman step in `O(r²)` for `r = max(p, q + 1)` states, the innovation it returns doubles as an anomaly score
 (its variance comes with it), and the whole state lives inline in a `Copy` struct.
 
-If you need exogenous regressors or automatic order selection today, this crate doesn't have them yet. statsmodels and
-R's `forecast` package have both; in Rust, [`foresight`](https://crates.io/crates/foresight) offers a stepwise
+If you need automatic order selection today, this crate doesn't have it yet. statsmodels and R's `forecast` package
+have it; in Rust, [`foresight`](https://crates.io/crates/foresight) offers a stepwise
 auto-ARIMA, but does not build for bare-metal targets.
 
 ## What's in it
@@ -45,7 +45,9 @@ auto-ARIMA, but does not build for bare-metal targets.
 - `Filter<R>`: built from an `ArimaSpec` alone, it expands the seasonal polynomials into its own arrays, differences raw values in place, returns one-step innovations,
   treats `NaN` as missing, and forecasts original-scale means, variances and intervals. `R` is the state capacity,
   `max(p + P s, q + Q s + 1) + d + D s`; the airline model ARIMA(0, 1, 1)(0, 1, 1, 12) needs `R = 27`.
-- `loglike` and `innovations` for any model size, through the same recursion as the filter.
+- Regression with ARIMA errors: `fit_exog`, `update_exog`, `forecast_exog_into` and friends model `y_t - x_t . beta`
+  with the regressors differenced along with `y`, as R's `arima(xreg=)` does.
+- `loglike` and `innovations` (and their `_exog` forms) for any model size, through the same recursion as the filter.
 - The building blocks: `acov`, `acorr`, `pacf`, `difference`, `integrate`, `yule_walker`, `burg`, `hannan_rissanen`
   and `normal_quantile`.
 
@@ -97,8 +99,8 @@ Three conventions differ from statsmodels' defaults on purpose:
 
 ## Status
 
-The crate covers seasonal ARIMA(p, d, q)(P, D, Q, s) with an optional mean or drift. Exogenous regressors, diagnostics
-(Ljung–Box, KPSS) and automatic order selection are planned, roughly in that order; the
+The crate covers seasonal ARIMA(p, d, q)(P, D, Q, s) with an optional mean or drift and exogenous regressors.
+Diagnostics (Ljung–Box, KPSS) and automatic order selection are planned, in that order; the
 [roadmap](https://github.com/sunsided/arima-rs/blob/main/docs/ROADMAP.md) has the details. The minimum supported Rust
 version is 1.85.
 

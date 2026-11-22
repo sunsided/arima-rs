@@ -10,6 +10,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Seasonal ARIMA(p, d, q)(P, D, Q, s): `Seasonal` in `ArimaSpec`, `Arima::seasonal`, and seasonal fields on
   `Fitted`. The filter expands the seasonal polynomials into its own arrays, so it stays heap-free.
+- Regression with ARIMA errors: `ArimaSpec::exog`, `Arima::fit_exog`, `Filter::update_exog`, `warm_up_exog`,
+  `forecast_exog_into` and `forecast_interval_exog_into`, `innovations_exog` and `loglike_exog`. Fitted models
+  report `exog`; `FilterError::Regressors` and `FitError::RegressorShape` are new.
 
 ### Changed
 
