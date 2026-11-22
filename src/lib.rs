@@ -29,6 +29,8 @@ pub use crate::autoregressive::{ArCoefficients, burg, yule_walker};
 pub use crate::difference::{difference, integrate};
 pub use crate::filter::{ArimaSpec, Filter, FilterError};
 #[cfg(feature = "alloc")]
+pub use crate::fit::{Arima, ArmaCoefficients, FitError, Fitted, hannan_rissanen};
+#[cfg(feature = "alloc")]
 pub use crate::likelihood::{innovations, loglike};
 pub use crate::state_space::Innovation;
 pub use crate::time_series::{TimeSeries, TimeSeriesError};
@@ -41,6 +43,8 @@ mod autoregressive;
 #[cfg(feature = "alloc")]
 mod difference;
 mod filter;
+#[cfg(feature = "alloc")]
+mod fit;
 #[cfg(feature = "alloc")]
 mod likelihood;
 mod math;
