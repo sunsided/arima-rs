@@ -6,10 +6,9 @@ use std::ops::Deref;
 
 #[derive(Debug, Clone)]
 pub struct TimeSeries<'a> {
-    values: &'a [f32],
-    mean: Cell<f32>,
-    var: Cell<f32>,
-    std: Cell<f32>,
+    values: &'a [f64],
+    mean: Cell<f64>,
+    var: Cell<f64>,
     estimator: Estimator,
 }
 
@@ -18,10 +17,10 @@ impl<'a> TimeSeries<'a> {
     ///
     /// ## Arguments
     /// * `values` - The time series data.
-    /// * `estimator` - The estimator. Using [`Estimator::Unbiased`] calculates the population
-    ///     statistics, while [`Estimator::Biased`] calculates the sample statistics.
-    pub fn try_new(values: &'a [f32], estimator: Estimator) -> Result<Self, TimeSeriesError> {
-        Self::try_new_with(values, f32::NAN, f32::NAN, f32::NAN, estimator)
+    /// * `estimator` - The estimator. [`Estimator::Unbiased`] divides by `n - 1` (the sample
+    ///   estimate of the population statistics), while [`Estimator::Biased`] divides by `n`.
+    pub fn try_new(values: &'a [f64], estimator: Estimator) -> Result<Self, TimeSeriesError> {
+        Self::try_new_with(values, f64::NAN, f64::NAN, estimator)
     }
 
     /// Creates a new [`TimeSeries`] instance.
@@ -29,18 +28,15 @@ impl<'a> TimeSeries<'a> {
     /// ## Arguments
     /// * `values` - The time series data.
     /// * `mean` - The pre-calculated mean.
-    ///     Pass [`f32::NAN`], [`f32::INFINITY`] or [`f32::NEG_INFINITY`] to force calculation of the mean.
+    ///   Pass [`f64::NAN`], [`f64::INFINITY`] or [`f64::NEG_INFINITY`] to force calculation of the mean.
     /// * `var` - The pre-calculated variance.
-    ///     Pass [`f32::NAN`], [`f32::INFINITY`] or [`f32::NEG_INFINITY`] to force calculation of the mean.
-    /// * `std` - The pre-calculated standard deviation.
-    ///     Pass [`f32::NAN`], [`f32::INFINITY`] or [`f32::NEG_INFINITY`] to force calculation of the mean.
-    /// * `estimator` - The estimator. Using [`Estimator::Unbiased`] calculates the population
-    ///     statistics, while [`Estimator::Biased`] calculates the sample statistics.
+    ///   Pass [`f64::NAN`], [`f64::INFINITY`] or [`f64::NEG_INFINITY`] to force calculation of the variance.
+    /// * `estimator` - The estimator. [`Estimator::Unbiased`] divides by `n - 1` (the sample
+    ///   estimate of the population statistics), while [`Estimator::Biased`] divides by `n`.
     pub fn try_new_with(
-        values: &'a [f32],
-        mean: f32,
-        var: f32,
-        std: f32,
+        values: &'a [f64],
+        mean: f64,
+        var: f64,
         estimator: Estimator,
     ) -> Result<Self, TimeSeriesError> {
         if values.is_empty() {
@@ -51,37 +47,20 @@ impl<'a> TimeSeries<'a> {
             values,
             mean: Cell::new(mean),
             var: Cell::new(var),
-            std: Cell::new(std),
             estimator,
         })
     }
 
     /// Slices this time series assuming that it is a stationary series.
     ///
-    /// This forces calculation of mean, variance and standard deviation if
+    /// This forces calculation of mean and variance if
     /// not already available from previous calculations in order to assure
     /// that these statistics remain the same regardless of the slice.
-    pub fn slice_stationary<R: std::slice::SliceIndex<[f32], Output = [f32]>>(
+    pub fn slice_stationary<R: std::slice::SliceIndex<[f64], Output = [f64]>>(
         &self,
         range: R,
-    ) -> Result<TimeSeries, TimeSeriesError> {
-        TimeSeries::try_new_with(
-            &self.values[range],
-            self.mean(),
-            self.var(),
-            self.std(),
-            self.estimator,
-        )
-    }
-
-    #[allow(dead_code)]
-    pub fn is_empty(&self) -> bool {
-        debug_assert!(!self.values.is_empty());
-        false
-    }
-
-    pub fn len(&self) -> usize {
-        self.values.len()
+    ) -> Result<TimeSeries<'a>, TimeSeriesError> {
+        TimeSeries::try_new_with(&self.values[range], self.mean(), self.var(), self.estimator)
     }
 
     pub fn estimator(&self) -> Estimator {
@@ -89,76 +68,73 @@ impl<'a> TimeSeries<'a> {
     }
 
     /// Obtains or calculates the mean.
-    pub fn mean(&self) -> f32 {
+    pub fn mean(&self) -> f64 {
         let mean = self.mean.get();
         if mean.is_finite() {
             return mean;
         }
 
-        debug_assert_ne!(self.values.len(), 0);
-        let sum: f32 = self.values.iter().sum();
-        let mean = sum / self.values.len() as f32;
+        let sum: f64 = self.values.iter().sum();
+        let mean = sum / self.values.len() as f64;
         self.mean.set(mean);
         mean
     }
 
-    /// Obtains or calculates the variation.
-    pub fn var(&self) -> f32 {
+    /// Obtains or calculates the variance.
+    ///
+    /// Returns [`f64::NAN`] for a single value with [`Estimator::Unbiased`],
+    /// since `n - 1` is zero there.
+    pub fn var(&self) -> f64 {
         let var = self.var.get();
         if var.is_finite() {
             return var;
         }
 
-        let mean = self.mean();
-        let tss: f32 = self.values.iter().map(|x| (x - mean) * (x - mean)).sum();
-        let var = match self.estimator {
-            Estimator::Biased => tss / self.len() as f32,
-            Estimator::Unbiased => tss / (self.len() - 1).max(1) as f32,
+        let tss: f64 = self.residuals().map(|r| r * r).sum();
+        let divisor = match self.estimator {
+            Estimator::Biased => self.values.len(),
+            Estimator::Unbiased => self.values.len() - 1,
         };
+        if divisor == 0 {
+            return f64::NAN;
+        }
 
+        let var = tss / divisor as f64;
         self.var.set(var);
         var
     }
 
-    /// Obtains or calculates the standard deviation.
-    pub fn std(&self) -> f32 {
-        let std = self.std.get();
-        if std.is_finite() {
-            return std;
-        }
-
-        let var = self.var();
-        let std = var.sqrt();
-        self.std.set(std);
-        std
+    /// Calculates the standard deviation.
+    pub fn std(&self) -> f64 {
+        self.var().sqrt()
     }
 
     /// Calculates the residuals, i.e. the deviations from the mean.
-    pub fn residuals(&self) -> impl Iterator<Item = f32> + 'a {
+    pub fn residuals(&self) -> impl Iterator<Item = f64> + 'a {
         let mean = self.mean();
         self.values.iter().map(move |x| x - mean)
     }
 }
 
-impl<'a> TryFrom<&'a [f32]> for TimeSeries<'a> {
+impl<'a> TryFrom<&'a [f64]> for TimeSeries<'a> {
     type Error = TimeSeriesError;
 
-    fn try_from(value: &'a [f32]) -> Result<Self, Self::Error> {
+    fn try_from(value: &'a [f64]) -> Result<Self, Self::Error> {
         TimeSeries::try_new(value, Estimator::Unbiased)
     }
 }
 
-impl<'a> Deref for TimeSeries<'a> {
-    type Target = &'a [f32];
+impl Deref for TimeSeries<'_> {
+    type Target = [f64];
 
     fn deref(&self) -> &Self::Target {
-        &self.values
+        self.values
     }
 }
 
-impl<'a> AsRef<&'a [f32]> for TimeSeries<'a> {
-    fn as_ref(&self) -> &&'a [f32] {
-        &self.values
+impl AsRef<[f64]> for TimeSeries<'_> {
+    fn as_ref(&self) -> &[f64] {
+        self.values
     }
 }
 
@@ -184,56 +160,62 @@ mod tests {
 
     #[test]
     fn test_mean() {
-        let values: &[f32] = &[2.0, 4.0, 6.0, 8.0, 10.0];
+        let values: &[f64] = &[2.0, 4.0, 6.0, 8.0, 10.0];
         let ts = TimeSeries::try_from(values).unwrap();
 
         let result = ts.mean();
 
-        let expected: f32 = 6.0;
-        assert_approx_eq!(f32, result, expected);
+        let expected: f64 = 6.0;
+        assert_approx_eq!(f64, result, expected);
     }
 
     #[test]
-    fn test_var_pop() {
-        let values: &[f32] = &[2.0, 4.0, 6.0, 8.0, 10.0];
+    fn test_var_unbiased() {
+        let values: &[f64] = &[2.0, 4.0, 6.0, 8.0, 10.0];
         let ts = TimeSeries::try_from(values).unwrap();
 
         let result = ts.var();
 
-        let expected: f32 = 10.0;
-        assert_approx_eq!(f32, result, expected);
+        let expected: f64 = 10.0;
+        assert_approx_eq!(f64, result, expected);
     }
 
     #[test]
-    fn test_std_pop() {
-        let values: &[f32] = &[2.0, 4.0, 6.0, 8.0, 10.0];
+    fn test_std_unbiased() {
+        let values: &[f64] = &[2.0, 4.0, 6.0, 8.0, 10.0];
         let ts = TimeSeries::try_from(values).unwrap();
 
         let result = ts.std();
 
-        let expected: f32 = 3.1622776601683795;
-        assert_approx_eq!(f32, result, expected);
+        let expected: f64 = 3.1622776601683795;
+        assert_approx_eq!(f64, result, expected);
     }
 
     #[test]
-    fn test_var_sample() {
-        let values: &[f32] = &[2.0, 4.0, 6.0, 8.0, 10.0];
+    fn test_var_biased() {
+        let values: &[f64] = &[2.0, 4.0, 6.0, 8.0, 10.0];
         let ts = TimeSeries::try_new(values, Estimator::Biased).unwrap();
 
         let result = ts.var();
 
-        let expected: f32 = 8.0;
-        assert_approx_eq!(f32, result, expected);
+        let expected: f64 = 8.0;
+        assert_approx_eq!(f64, result, expected);
     }
 
     #[test]
-    fn test_std_sample() {
-        let values: &[f32] = &[2.0, 4.0, 6.0, 8.0, 10.0];
+    fn test_std_biased() {
+        let values: &[f64] = &[2.0, 4.0, 6.0, 8.0, 10.0];
         let ts = TimeSeries::try_new(values, Estimator::Biased).unwrap();
 
         let result = ts.std();
 
-        let expected: f32 = 2.8284271247461903;
-        assert_approx_eq!(f32, result, expected);
+        let expected: f64 = 2.8284271247461903;
+        assert_approx_eq!(f64, result, expected);
+    }
+
+    #[test]
+    fn test_var_unbiased_single_value_is_nan() {
+        let ts = TimeSeries::try_new(&[1.0], Estimator::Unbiased).unwrap();
+        assert!(ts.var().is_nan());
     }
 }
