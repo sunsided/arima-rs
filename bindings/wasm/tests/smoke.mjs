@@ -47,6 +47,14 @@ assert.throws(() => Model.fit(y.slice(0, 3), 2, 0, 2, 0, 0, 0, 0), /needs/);
 assert.throws(() => new Stream(Model.fit(y, 0, 1, 1, 0, 1, 1, 52)), /states/);
 assert.ok(Model.fit(y, 1, 0, 0, 0, 0, 0, 0).sigma2 > 0, "the instance survives the errors");
 
+// A model fitted elsewhere streams without a fit.
+const given = Model.fromCoefficients([0.5], 1, [0.3], [], 0, [], 0, 0.2, 1.5);
+assert.equal(given.label(), "ARIMA(1,1,1) with drift");
+assert.ok(Number.isNaN(given.loglike));
+assert.ok(given.forecast(y, 3, 0.9).mean().every(Number.isFinite));
+assert.throws(() => Model.fromCoefficients([1.2], 0, [], [], 0, [], 0, 0, 1), /stationary/);
+assert.throws(() => Model.fromCoefficients([0.5], 0, [], [], 0, [], 0, 0, 0), /sigma2/);
+
 // The largest models the filter holds fit on the wasm stack: 63 of 64 states.
 const large = Model.fit(y, 1, 1, 1, 1, 1, 1, 30);
 assert.equal(large.states, 63);

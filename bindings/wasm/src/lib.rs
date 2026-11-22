@@ -126,6 +126,64 @@ impl Model {
         })
     }
 
+    /// A model from known coefficients, for example ones fitted in statsmodels or R, in
+    /// their sign convention: `phi(B) Phi(B^s) w_t = theta(B) Theta(B^s) e_t` with
+    /// `w_t = (1 - B)^d (1 - B^s)^D y_t - mean` and `Var(e_t) = sigma2`. It streams and
+    /// forecasts like a fitted model; its likelihood and criteria are `NaN`.
+    ///
+    /// # Errors
+    ///
+    /// When a coefficient is not finite, `sigma2` is not positive, a seasonal part has no
+    /// period, an order is out of range, or the AR part is not stationary.
+    #[wasm_bindgen(js_name = fromCoefficients)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "JavaScript has no builder here; the coefficients are plain arrays"
+    )]
+    pub fn from_coefficients(
+        ar: Vec<f64>,
+        d: usize,
+        ma: Vec<f64>,
+        seasonal_ar: Vec<f64>,
+        seasonal_d: usize,
+        seasonal_ma: Vec<f64>,
+        period: usize,
+        mean: f64,
+        sigma2: f64,
+    ) -> Result<Model, JsError> {
+        check_orders(ar.len(), d, ma.len())?;
+        check_orders(seasonal_ar.len(), seasonal_d, seasonal_ma.len())?;
+        let seasonal = !seasonal_ar.is_empty() || seasonal_d > 0 || !seasonal_ma.is_empty();
+        if seasonal && !(2..=MAX_PERIOD).contains(&period) {
+            return Err(JsError::new(&format!(
+                "a seasonal part needs a period between 2 and {MAX_PERIOD}"
+            )));
+        }
+
+        let fitted = Fitted {
+            ar,
+            d,
+            ma,
+            seasonal_ar,
+            seasonal_d,
+            seasonal_ma,
+            period: if seasonal { period } else { 0 },
+            exog: Vec::new(),
+            with_mean: mean != 0.0,
+            mean,
+            sigma2,
+            loglike: f64::NAN,
+            nobs: 0,
+            iterations: 0,
+            converged: true,
+        };
+        // The likelihood of no data checks every parameter and the stationarity of the AR
+        // part, with no limit on the state count.
+        backshift::loglike(&[], &fitted.spec()).map_err(error)?;
+
+        Ok(Model { fitted })
+    }
+
     /// The model in R's notation, for example `ARIMA(0,1,1)(0,1,1)[12]`.
     #[must_use]
     pub fn label(&self) -> String {

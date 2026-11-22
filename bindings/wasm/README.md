@@ -37,6 +37,8 @@ const isAnomaly = Math.abs(innovation) > 3 * Math.sqrt(variance);
   one; `NaN` marks a missing value.
 - `Model` exposes the coefficients (`ar()`, `ma()`, `seasonalAr()`, `seasonalMa()`), `mean`, `sigma2`, `loglike`,
   `aic`, `aicc`, `bic` and `label()`.
+- `Model.fromCoefficients(ar, d, ma, seasonalAr, D, seasonalMa, period, mean, sigma2)` takes a model fitted elsewhere
+  (statsmodels, R) in their sign convention, to stream and forecast without fitting.
 - `model.refit(window, mean)` re-estimates the model on recent values, warm-started from the current one.
 - `ljungBox(residuals, lags, modelDf)` returns `[statistic, pValue]`.
 
