@@ -56,11 +56,19 @@ impl<'a> TimeSeries<'a> {
     /// This forces calculation of mean and variance if
     /// not already available from previous calculations in order to assure
     /// that these statistics remain the same regardless of the slice.
+    ///
+    /// # Errors
+    ///
+    /// [`TimeSeriesError::NotEnoughData`] if `range` is out of bounds or empty.
     pub fn slice_stationary<R: core::slice::SliceIndex<[f64], Output = [f64]>>(
         &self,
         range: R,
     ) -> Result<TimeSeries<'a>, TimeSeriesError> {
-        TimeSeries::try_new_with(&self.values[range], self.mean(), self.var(), self.estimator)
+        let values = self
+            .values
+            .get(range)
+            .ok_or(TimeSeriesError::NotEnoughData)?;
+        TimeSeries::try_new_with(values, self.mean(), self.var(), self.estimator)
     }
 
     pub fn estimator(&self) -> Estimator {
@@ -211,6 +219,14 @@ mod tests {
 
         let expected: f64 = 2.8284271247461903;
         assert_approx_eq!(f64, result, expected);
+    }
+
+    #[test]
+    fn slice_out_of_bounds_is_an_error() {
+        let ts = TimeSeries::try_from(&[1.0, 2.0, 3.0][..]).unwrap();
+        assert!(ts.slice_stationary(..10).is_err());
+        assert!(ts.slice_stationary(1..1).is_err());
+        assert_eq!(&*ts.slice_stationary(1..).unwrap(), &[2.0, 3.0]);
     }
 
     #[test]
