@@ -487,7 +487,8 @@ pub enum FitError {
     },
     /// The likelihood has no finite maximum: the model explains the series exactly, so the
     /// innovation variance is zero (a constant series with a mean, or a straight line with
-    /// a drift). From [`AutoArima`], also when every fitted candidate was rejected.
+    /// a drift), or the values are so large (beyond about `1e154`) that the variance
+    /// overflows. From [`AutoArima`], also when every fitted candidate was rejected.
     Degenerate,
 }
 
@@ -554,6 +555,9 @@ mod tests {
             Arima::new(0, 1, 1).mean(true).fit(&line),
             Err(FitError::Degenerate)
         );
+
+        let huge: Vec<f64> = (0..30).map(|t| 1e200 * f64::from(t % 3)).collect();
+        assert_eq!(Arima::new(1, 0, 0).fit(&huge), Err(FitError::Degenerate));
     }
 
     #[test]

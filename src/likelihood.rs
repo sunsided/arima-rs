@@ -122,7 +122,8 @@ pub fn loglike_exog(
 /// `sigma2 = 1`, and the maximising `sigma2 = sum(v_t^2 / F_t) / n` follows in closed
 /// form over the `n` non-missing values. Returns `(log-likelihood, sigma2, n)`, the
 /// same maximum as the full likelihood, or [`None`] if the model is invalid, no
-/// value is present, or `sigma2` is not positive (the model fits `w` exactly).
+/// value is present, or `sigma2` is not positive and finite (the model fits `w` exactly, or
+/// the values are so large that their squares overflow).
 pub(crate) fn concentrated(
     w: &[f64],
     shape: &ArimaSpec<'_>,
@@ -154,7 +155,7 @@ pub(crate) fn concentrated(
 
     let n = count as f64;
     let sigma2 = weighted / n;
-    if sigma2.is_nan() || sigma2 <= 0.0 {
+    if !sigma2.is_finite() || sigma2 <= 0.0 {
         return None;
     }
 
