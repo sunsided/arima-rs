@@ -24,6 +24,7 @@ pub use hannan_rissanen::{ArmaCoefficients, hannan_rissanen};
 use crate::difference::difference;
 use crate::filter::ArimaSpec;
 use crate::likelihood::concentrated;
+use crate::math;
 use alloc::vec::Vec;
 use core::error::Error;
 use core::fmt::{Display, Formatter};
@@ -112,6 +113,7 @@ impl Arima {
             ar,
             d: self.d,
             ma,
+            with_mean: self.mean,
             mean,
             sigma2,
             loglike,
@@ -173,6 +175,8 @@ pub struct Fitted {
     pub d: usize,
     /// The MA coefficients `theta_1, ..., theta_q`. Always invertible.
     pub ma: Vec<f64>,
+    /// Whether the mean of the differenced series was estimated.
+    pub with_mean: bool,
     /// The mean of the differenced series; `0.0` if it was not estimated.
     pub mean: f64,
     /// The innovation variance at the optimum.
@@ -188,6 +192,41 @@ pub struct Fitted {
 }
 
 impl Fitted {
+    /// The number of estimated parameters: `p + q`, one for the mean if estimated, and
+    /// one for `sigma2`. This is the `k` of the information criteria.
+    #[must_use]
+    pub fn parameters(&self) -> usize {
+        self.ar.len() + self.ma.len() + usize::from(self.with_mean) + 1
+    }
+
+    /// Akaike's information criterion, `-2 loglike + 2k`.
+    #[must_use]
+    pub fn aic(&self) -> f64 {
+        -2.0 * self.loglike + 2.0 * self.parameters() as f64
+    }
+
+    /// The small-sample corrected AIC, `AIC + 2k(k + 1) / (n - k - 1)` with `n = nobs`.
+    /// Infinite when `n <= k + 1`.
+    #[must_use]
+    pub fn aicc(&self) -> f64 {
+        let k = self.parameters() as f64;
+        let n = self.nobs as f64;
+        if n <= k + 1.0 {
+            return f64::INFINITY;
+        }
+
+        self.aic() + 2.0 * k * (k + 1.0) / (n - k - 1.0)
+    }
+
+    /// The Bayesian information criterion, `-2 loglike + k ln(n)` with `n = nobs`.
+    ///
+    /// `n` counts only non-missing values, as R's `arima` does. statsmodels also counts
+    /// missing ones, so its BIC and AICc differ when the series has gaps.
+    #[must_use]
+    pub fn bic(&self) -> f64 {
+        -2.0 * self.loglike + self.parameters() as f64 * math::ln(self.nobs as f64)
+    }
+
     /// The fitted model as a spec, for [`Filter::new`](crate::Filter::new),
     /// [`loglike`](crate::loglike) and [`innovations`](crate::innovations).
     #[must_use]
@@ -259,6 +298,29 @@ mod tests {
                 present: 2
             }
         );
+    }
+
+    #[test]
+    fn criteria_formulas() {
+        let fitted = Fitted {
+            ar: alloc::vec![0.5],
+            d: 0,
+            ma: alloc::vec![0.2, 0.1],
+            with_mean: true,
+            mean: 1.0,
+            sigma2: 1.0,
+            loglike: -50.0,
+            nobs: 40,
+            iterations: 3,
+            converged: true,
+        };
+        assert_eq!(fitted.parameters(), 5);
+        assert_eq!(fitted.aic(), 110.0);
+        assert!((fitted.aicc() - (110.0 + 60.0 / 34.0)).abs() < 1e-12);
+        assert!((fitted.bic() - (100.0 + 5.0 * 40.0_f64.ln())).abs() < 1e-12);
+
+        let tiny = Fitted { nobs: 6, ..fitted };
+        assert_eq!(tiny.aicc(), f64::INFINITY);
     }
 
     #[test]

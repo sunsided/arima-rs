@@ -25,8 +25,7 @@ pub(crate) fn ln(x: f64) -> f64 {
 }
 
 /// Natural logarithm of `x`; `NaN` for negative input, `-inf` for zero.
-// Only the log-likelihood needs `ln`, and it requires `alloc`.
-#[cfg(all(not(feature = "std"), feature = "libm", feature = "alloc"))]
+#[cfg(all(not(feature = "std"), feature = "libm"))]
 #[inline]
 pub(crate) fn ln(x: f64) -> f64 {
     libm::log(x)

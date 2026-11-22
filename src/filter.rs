@@ -15,6 +15,8 @@
 //! - Forecasts and their variances are on the original scale and match statsmodels
 //!   `ARIMA(y, order=(p, d, q), trend=...).filter(params).get_forecast(h)`.
 
+use crate::math;
+use crate::normal::normal_quantile;
 use crate::state_space::{self, Innovation, LyapunovScratch, System};
 use core::error::Error;
 use core::fmt::{Display, Formatter};
@@ -261,6 +263,52 @@ impl<const R: usize> Filter<R> {
         }
 
         Forecast::start(self).run(mean, variance);
+    }
+
+    /// Forecasts the next `mean.len()` raw values with central prediction intervals.
+    ///
+    /// `lower[h]` and `upper[h]` bound the value `h + 1` steps ahead with probability
+    /// `level` under the model's Gaussian errors: `mean ± z sqrt(variance)` with
+    /// `z = Φ⁻¹((1 + level) / 2)`, as statsmodels `conf_int(alpha=1 - level)`. A
+    /// `level` outside `[0, 1]` gives `NaN` bounds; `level = 1` gives infinite ones.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `mean`, `lower` and `upper` do not all have the same length.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use backshift::{ArimaSpec, Filter};
+    ///
+    /// let spec = ArimaSpec { ar: &[0.5], d: 0, ma: &[], mean: 0.0, sigma2: 1.0 };
+    /// let filter = Filter::<2>::new(&spec).unwrap();
+    /// let (mut mean, mut lower, mut upper) = ([0.0; 1], [0.0; 1], [0.0; 1]);
+    /// filter.forecast_interval_into(0.95, &mut mean, &mut lower, &mut upper);
+    /// // The stationary variance of this AR(1) is 1 / (1 - 0.25).
+    /// let half_width = 1.959963984540054 * (1.0_f64 / 0.75).sqrt();
+    /// assert!((upper[0] - half_width).abs() < 1e-12);
+    /// ```
+    pub fn forecast_interval_into(
+        &self,
+        level: f64,
+        mean: &mut [f64],
+        lower: &mut [f64],
+        upper: &mut [f64],
+    ) {
+        assert!(
+            mean.len() == lower.len() && mean.len() == upper.len(),
+            "mean, lower and upper must have the same length"
+        );
+
+        // `upper` holds the variances until it is overwritten below.
+        self.forecast_into(mean, upper);
+        let z = normal_quantile(f64::midpoint(1.0, level));
+        for ((m, lo), up) in mean.iter().zip(lower.iter_mut()).zip(upper.iter_mut()) {
+            let half_width = z * math::sqrt(*up);
+            *lo = m - half_width;
+            *up = m + half_width;
+        }
     }
 
     /// Differences `y` through the stored levels and returns `(1 - B)^d y_t`, or [`None`]

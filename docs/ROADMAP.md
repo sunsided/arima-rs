@@ -19,6 +19,8 @@ The crate is published as `backshift`, because `arima` is taken on crates.io. Ph
 5. Fitting: Hannan–Rissanen, BFGS and `fit`.
 6. Forecast intervals and fit statistics: AIC, AICc and BIC.
 
+Phase 1 is complete with step 6. Two conventions differ from statsmodels' defaults on purpose and are documented in the code: the likelihood for `d > 0` uses simple differencing (as R does), and BIC and AICc count only non-missing values (as R does).
+
 Reference vectors come from `scripts/generate_reference.py`. Every quoted number in this document must be regenerated from the series in that script before a test uses it.
 
 ## 0. Summary

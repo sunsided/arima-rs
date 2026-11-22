@@ -1,7 +1,7 @@
 //! Proves the device path never allocates.
 //!
 //! A counting global allocator wraps the system one. The test builds a
-//! [`Filter`], warms it up, streams values and forecasts, and asserts that
+//! [`Filter`], warms it up, streams values, forecasts with intervals, and asserts that
 //! the count did not move. It runs without the libtest harness
 //! (`harness = false`), so no harness thread allocates while it measures.
 
@@ -52,9 +52,11 @@ fn main() {
         std::hint::black_box(filter.update(y));
     }
     filter.forecast_into(&mut mean, &mut variance);
+    let (mut lower, mut upper) = ([0.0; 6], [0.0; 6]);
+    filter.forecast_interval_into(0.95, &mut mean, &mut lower, &mut upper);
 
     let after = ALLOCATIONS.load(Ordering::SeqCst);
-    std::hint::black_box((&mean, &variance));
+    std::hint::black_box((&mean, &variance, &lower, &upper));
     assert_eq!(
         after - before,
         0,

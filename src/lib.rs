@@ -1,4 +1,34 @@
-//! Time-series statistics for ARIMA modelling.
+//! ARIMA modelling that also runs on devices without a heap.
+//!
+//! Fit a model with `Arima::fit` (feature `alloc`), then stream new values through a [`Filter`],
+//! which lives inline with no allocation, and forecast with prediction intervals.
+//! Likelihoods, innovations, forecasts and intervals match statsmodels to 1e-9.
+//!
+//! ```
+//! # #[cfg(feature = "alloc")]
+//! # fn main() {
+//! use backshift::{Arima, Filter};
+//!
+//! let history = [0.3, 1.1, 0.4, -0.2, 0.9, 1.4, 0.6, 0.1, -0.5, 0.2, 0.8, 1.0, 0.3, -0.1, 0.4];
+//! let fitted = Arima::new(1, 0, 0).fit(&history).unwrap();
+//! println!("AIC {:.2}", fitted.aic());
+//!
+//! // The device side needs only the coefficients.
+//! let mut filter = Filter::<4>::new(&fitted.spec()).unwrap();
+//! filter.warm_up(&history);
+//! let innovation = filter.update(0.7).unwrap();
+//! assert!(innovation.variance > 0.0);
+//!
+//! let (mut mean, mut lower, mut upper) = ([0.0; 3], [0.0; 3], [0.0; 3]);
+//! filter.forecast_interval_into(0.95, &mut mean, &mut lower, &mut upper);
+//! assert!(lower[0] < mean[0] && mean[0] < upper[0]);
+//! # }
+//! # #[cfg(not(feature = "alloc"))]
+//! # fn main() {}
+//! ```
+//!
+//! The crate also has the building blocks: autocorrelation ([`acorr`], [`acov`]) and,
+//! with `alloc`, differencing and the Yule–Walker, Burg and Hannan–Rissanen estimators.
 //!
 //! The crate is `no_std`. Its features:
 //!
@@ -32,6 +62,7 @@ pub use crate::filter::{ArimaSpec, Filter, FilterError};
 pub use crate::fit::{Arima, ArmaCoefficients, FitError, Fitted, hannan_rissanen};
 #[cfg(feature = "alloc")]
 pub use crate::likelihood::{innovations, loglike};
+pub use crate::normal::normal_quantile;
 pub use crate::state_space::Innovation;
 pub use crate::time_series::{TimeSeries, TimeSeriesError};
 #[cfg(feature = "alloc")]
@@ -48,6 +79,7 @@ mod fit;
 #[cfg(feature = "alloc")]
 mod likelihood;
 mod math;
+mod normal;
 mod state_space;
 mod time_series;
 
