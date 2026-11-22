@@ -1,6 +1,6 @@
 [package]
 name = "backshift"
-version = "0.1.0"
+version = "0.2.0"
 description = "ARIMA models fitted by exact maximum likelihood, with a streaming filter that runs without a heap"
 authors = ["Markus Mayer"]
 repository = "https://github.com/sunsided/arima-rs"
