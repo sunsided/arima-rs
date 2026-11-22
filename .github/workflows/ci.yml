@@ -14,7 +14,11 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        features: ["", "--no-default-features --features libm"]
+        features:
+          - ""
+          - "--no-default-features --features libm,alloc"
+          # No allocator: integration tests need `alloc` and are skipped.
+          - "--no-default-features --features libm"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,6 +47,20 @@ jobs:
           targets: ${{ matrix.target }}
       - run: cargo build --lib --no-default-features --features libm --target ${{ matrix.target }}
 
+  firmware:
+    name: firmware link without allocator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
+        with:
+          toolchain: stable
+          targets: thumbv7em-none-eabihf
+      - run: cargo build --release --target thumbv7em-none-eabihf
+        working-directory: ci/firmware
+
   msrv:
     name: msrv (1.81)
     runs-on: ubuntu-latest
@@ -56,3 +74,4 @@ jobs:
       # Library only: dev-dependencies may need a newer toolchain.
       - run: cargo check --lib
       - run: cargo check --lib --no-default-features --features libm
+      - run: cargo check --lib --no-default-features --features libm,alloc

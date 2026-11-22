@@ -8,10 +8,13 @@ the GitHub REST API (stars and last push), local `cargo tree` and cross-compile 
 
 The crate is published as `backshift`, because `arima` is taken on crates.io. Phase 1 ships as one pull request per step, in this order. It differs from section 3: the streaming filter comes before the optimiser, because it is the lead edge and already works with coefficients fitted elsewhere.
 
-1. `no_std` + `alloc`, the `std`/`libm` features, and CI for bare-metal and WASM targets.
+1. `no_std`, the `std`/`libm` features, and CI for bare-metal and WASM targets.
+   - Follow-up: an `alloc` feature (implied by `std`) gates every `Vec` API. With `alloc` in the crate graph, firmware fails to link without a `#[global_allocator]` even if nothing allocates. CI links a bare-metal binary (`ci/firmware`) to keep that true.
 2. Differencing and integration.
 3. AR fitting: Yule–Walker and Burg.
-4. The Kalman core and `Filter<R>`: log-likelihood, innovations and forecasts at fixed parameters, plus the panicking-allocator test. The likelihood and the filter share one allocation-free recursion.
+4. The Kalman core and `Filter<R>`, in two parts. The likelihood and the filter share one allocation-free recursion over slices with a stride, written for this crate rather than on `minikalman`, whose dimensions are compile-time only.
+   - 4a: ARMA only (`d = 0`, no mean). Log-likelihood, innovations and forecasts at fixed parameters, streaming checked against statsmodels `extend`, and a counting-allocator test.
+   - 4b: differencing and a mean or drift inside the filter. statsmodels `trend='c'` in SARIMAX is an intercept, not a mean, and `d >= 1` has no stationary start, so these need their own conventions.
 5. Fitting: Hannan–Rissanen, BFGS and `fit`.
 6. Forecast intervals and fit statistics: AIC, AICc and BIC.
 

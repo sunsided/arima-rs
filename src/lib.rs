@@ -1,7 +1,15 @@
 //! Time-series statistics for ARIMA modelling.
 //!
-//! The crate is `no_std` and needs only `alloc`. Enable exactly one of the
-//! `std` (default) or `libm` features to provide the floating-point functions.
+//! The crate is `no_std`. Its features:
+//!
+//! - `std` (default): floating-point functions from the standard library. Implies `alloc`.
+//! - `libm`: floating-point functions from the pure-Rust `libm` crate, for targets without `std`.
+//! - `alloc`: the functions that return a `Vec`, such as `pacf`, `difference`,
+//!   `yule_walker` and `burg`. Without it the crate never touches a heap, so firmware
+//!   needs no global allocator.
+//!
+//! Enable `std` or `libm`. A firmware build is `default-features = false, features = ["libm"]`,
+//! plus `"alloc"` if it has an allocator.
 
 #![no_std]
 #![forbid(unsafe_code)]
@@ -9,18 +17,24 @@
 #[cfg(not(any(feature = "std", feature = "libm")))]
 compile_error!("enable the `std` feature or, for `no_std` targets, the `libm` feature");
 
+#[cfg(feature = "alloc")]
 extern crate alloc;
 
 #[cfg(any(feature = "std", test))]
 extern crate std;
 
+#[cfg(feature = "alloc")]
 pub use crate::autoregressive::{burg, yule_walker, ArCoefficients};
+#[cfg(feature = "alloc")]
 pub use crate::difference::{difference, integrate};
 pub use crate::time_series::{TimeSeries, TimeSeriesError};
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 use core::borrow::Borrow;
 
+#[cfg(feature = "alloc")]
 mod autoregressive;
+#[cfg(feature = "alloc")]
 mod difference;
 mod math;
 mod time_series;
@@ -157,6 +171,7 @@ pub fn corr<'x, 'y, X: Borrow<TimeSeries<'x>>, Y: Borrow<TimeSeries<'y>>>(
 /// ## Returns
 /// [`None`] if no lag can be computed (zero lags, a single value or a constant series),
 /// or the partial autocorrelations, starting with `1.0` for lag 0.
+#[cfg(feature = "alloc")]
 pub fn pacf<'x, X: Borrow<TimeSeries<'x>>>(values: X, max_lags: usize) -> Option<Vec<f64>> {
     let values = values.borrow();
     let max_lags = max_lags.min(values.len() - 1);
@@ -237,6 +252,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "alloc")]
     fn test_pacf() {
         let values = signal_gen(1000);
         let values = TimeSeries::try_new(&values, Estimator::Unbiased).unwrap();
@@ -307,21 +323,26 @@ mod tests {
         let constant = TimeSeries::try_new(&[3.0; 5], Estimator::Unbiased).unwrap();
         assert_eq!(acorr(&constant, 1), None);
         assert_eq!(corr(&constant, &constant), None);
-        assert_eq!(pacf(&constant, 3), None);
 
         let values = TimeSeries::try_new(&[2.0, 4.0, 6.0, 8.0, 10.0], Estimator::Unbiased).unwrap();
-        assert_eq!(pacf(&values, 0), None);
         assert_eq!(cov(&short, &values), None);
     }
 
     #[test]
-    fn test_pacf_caps_lags() {
+    #[cfg(feature = "alloc")]
+    fn test_pacf_edge_cases() {
+        let constant = TimeSeries::try_new(&[3.0; 5], Estimator::Unbiased).unwrap();
+        assert_eq!(pacf(&constant, 3), None);
+
         let values = TimeSeries::try_new(&[2.0, 4.0, 6.0, 8.0, 10.0], Estimator::Unbiased).unwrap();
+        assert_eq!(pacf(&values, 0), None);
+
         let result = pacf(&values, usize::MAX).unwrap();
         assert_eq!(result.len(), 5);
         assert!(result.iter().all(|r| r.is_finite()));
     }
 
+    #[cfg(feature = "alloc")]
     fn signal_gen(len: usize) -> Vec<f64> {
         let f_base = 2.5;
         let a_base = 4.0;
