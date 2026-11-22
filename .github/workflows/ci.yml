@@ -120,6 +120,10 @@ jobs:
           package-manager-cache: false
       # The bindings are their own workspace, so the root jobs do not see them.
       - run: cargo fmt --check --manifest-path bindings/wasm/Cargo.toml
+      # release-plz bumps the crate's version in its release PRs but only updates the root
+      # lockfile; refresh the bindings' entry for the path dependency, keeping every registry
+      # dependency locked.
+      - run: cargo update --manifest-path bindings/wasm/Cargo.toml -p backshift
       - run: cargo clippy --locked --manifest-path bindings/wasm/Cargo.toml --target wasm32-unknown-unknown -- -D warnings
       - run: bindings/wasm/build.sh
       - run: node bindings/wasm/tests/smoke.mjs
