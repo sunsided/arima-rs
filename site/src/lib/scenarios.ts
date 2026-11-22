@@ -1,9 +1,10 @@
-// The three demonstrations, as plain functions over the package: each runs the model and
+// The demonstrations, as plain functions over the package: each runs the model and
 // returns the chart it implies. The site renders them interactively; the README script
 // renders the same functions to static images.
 
 import type * as Backshift from '@sunsided/backshift';
-import type { ChartSpec } from './chart.ts';
+import type { ChartSpec, Role } from './chart.ts';
+import type { ActiveUsers } from './data.ts';
 
 /** The package's exports the scenarios use. */
 export type Api = Pick<typeof Backshift, 'Model' | 'Stream' | 'ljungBox'>;
@@ -233,5 +234,112 @@ export function driftCharts(
 				{ kind: 'points', x: refits.map((r) => r.end), y: refits.map((r) => r.ar), role: 'refit', label: 'Refit' }
 			]
 		}
+	};
+}
+
+/** One side of the calendar comparison: a fit and its forecast. */
+export interface CalendarFit {
+	aicc: number;
+	sigma: number;
+	mean: Float64Array;
+	lower: Float64Array;
+	upper: Float64Array;
+}
+
+/** The calendar scenario: the fits with and without regressors, and their chart. */
+export interface CalendarResult {
+	label: string;
+	/** The fitted users lost on a holiday and during an outage. */
+	effects: { holiday: number; outage: number };
+	with: CalendarFit;
+	without: CalendarFit;
+	fitMillis: number;
+	chart: ChartSpec;
+}
+
+/**
+ * The SARIMAX demonstration of `examples/holidays_outages.rs`: fits SARIMA(1,0,0)(0,1,1,7)
+ * to `data` with and without the holiday and outage regressors, and forecasts `horizon`
+ * days with 95% intervals. The calendar knows the holiday `upcoming` days ahead (0-based);
+ * no outage is planned. The chart shows the last `shown` days of history.
+ */
+export function calendarScenario(
+	api: Api,
+	data: ActiveUsers,
+	horizon = 28,
+	upcoming = 10,
+	shown = 140,
+	size = { width: 760, height: 320 }
+): CalendarResult {
+	const history = Float64Array.from(data.values);
+	const regressors = Float64Array.from(data.regressors);
+	const future = Float64Array.from({ length: 2 * horizon }, (_, i) => Number(i === 2 * upcoming));
+	const started = performance.now();
+	const withModel = api.Model.fit(history, 1, 0, 0, 0, 1, 1, 7, undefined, regressors, 2);
+	let withoutModel: Backshift.Model | undefined;
+	let wide: Backshift.Forecast | undefined;
+	let plain: Backshift.Forecast | undefined;
+	try {
+		withoutModel = api.Model.fit(history, 1, 0, 0, 0, 1, 1, 7);
+		const fitMillis = performance.now() - started;
+		wide = withModel.forecast(history, horizon, 0.95, regressors, future);
+		plain = withoutModel.forecast(history, horizon, 0.95);
+		const side = (model: Backshift.Model, forecast: Backshift.Forecast): CalendarFit => ({
+			aicc: model.aicc,
+			sigma: Math.sqrt(model.sigma2),
+			mean: forecast.mean(),
+			lower: forecast.lower(),
+			upper: forecast.upper()
+		});
+		const [holiday, outage] = withModel.exog();
+		const result = { with: side(withModel, wide), without: side(withoutModel, plain) };
+		return {
+			label: withModel.label(),
+			effects: { holiday, outage },
+			...result,
+			fitMillis,
+			chart: calendarChart(data, result.with, result.without, upcoming, shown, size)
+		};
+	} finally {
+		wide?.free();
+		plain?.free();
+		withoutModel?.free();
+		withModel.free();
+	}
+}
+
+/** The calendar chart: recent history with holidays and outages shaded, and both forecasts. */
+function calendarChart(
+	data: ActiveUsers,
+	withFit: CalendarFit,
+	withoutFit: CalendarFit,
+	upcoming: number,
+	shown: number,
+	size: { width: number; height: number }
+): ChartSpec {
+	const n = data.values.length;
+	const from = Math.max(0, n - shown);
+	const x = data.values.slice(from).map((_, i) => from + i);
+	const joinX = [n - 1, ...withFit.mean.map((_, h) => n + h)];
+	const join = (series: Float64Array) => [data.values[n - 1], ...series];
+	const day = (t: number, role: Role) => ({ x0: t - 0.5, x1: t + 0.5, role });
+	return {
+		...size,
+		title: 'Daily active users: holidays (grey) and outages (red) shaded, forecasts with and without regressors',
+		xLabel: 'day',
+		layers: [
+			{ kind: 'band', x: joinX, lower: join(withFit.lower), upper: join(withFit.upper), role: 'band-outer', label: '95% interval, with regressors' },
+			{ kind: 'line', x, y: data.values.slice(from), role: 'data', label: 'Observed' },
+			{ kind: 'line', x: joinX, y: join(withFit.mean), role: 'forecast', label: 'Forecast with regressors', dashed: true },
+			// On top, so it shows where the two forecasts part: at the holiday.
+			{ kind: 'line', x: joinX, y: join(withoutFit.mean), role: 'muted', label: 'Forecast without regressors', dashed: true }
+		],
+		regions: [
+			...data.holidays.filter((t) => t >= from).map((t) => day(t, 'muted')),
+			...data.outages.filter((t) => t >= from).map((t) => day(t, 'critical')),
+			day(n + upcoming, 'muted')
+		],
+		// No 'now' marker: its label would collide with the holiday's, 10 days on.
+		markers: [{ x: n + upcoming, label: 'bank holiday' }]
 	};
 }
