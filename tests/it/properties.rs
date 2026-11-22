@@ -1,6 +1,6 @@
 //! Property tests: invariants that must hold for any non-constant series.
 
-use arima::{acorr, acov, corr, cov, pacf, Estimator, TimeSeries};
+use backshift::{acorr, acov, corr, cov, pacf, Estimator, TimeSeries};
 use proptest::prelude::*;
 
 /// Absolute slack for floating-point round-off in the invariants below.
