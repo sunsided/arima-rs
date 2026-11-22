@@ -62,7 +62,8 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
   `ArimaSpec::capacity()`, i.e. `max(p + P s, q + Q s + 1) + d + D s` or the number of regressors if that is
   larger; the airline model ARIMA(0, 1, 1)(0, 1, 1, 12) needs `R = 27`.
 - Regression with ARIMA errors: `fit_exog`, `update_exog`, `forecast_exog_into` and friends model `y_t - x_t . beta`
-  with the regressors differenced along with `y`, as R's `arima(xreg=)` does.
+  with the regressors differenced along with `y`, as R's `arima(xreg=)` does. [`examples/holidays_outages.rs`](https://github.com/sunsided/arima-rs/blob/main/examples/holidays_outages.rs)
+  fits daily users with bank-holiday and outage dummies, and forecasts through a known upcoming holiday.
 - `loglike` and `innovations` (and their `_exog` forms) for any model size, through the same recursion as the filter.
 - `AutoArima`: the stepwise search (or an exhaustive one, parallel with the `rayon` feature) with `ndiffs` and
   `nsdiffs` choosing `d` and `D`; AICc by default, AIC or BIC on request.
