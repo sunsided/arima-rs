@@ -1,0 +1,16 @@
+# Runs backshift on wasm32-wasip1, a WASI target without threads (as in VS Code's WASI
+# host), under wasmtime. CI runs it with
+#     cargo run --target wasm32-wasip1   (CARGO_TARGET_WASM32_WASIP1_RUNNER=wasmtime)
+# The crate's own tests cannot run there: proptest's dependencies need threads.
+[package]
+name = "backshift-wasi-check"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+# Default features: `std`, and no `rayon`, so nothing spawns a thread.
+backshift = { path = "../.." }
+
+# Keep this crate out of any parent workspace.
+[workspace]

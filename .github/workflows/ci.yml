@@ -64,6 +64,26 @@ jobs:
       - run: cargo build --release --target thumbv7em-none-eabihf
         working-directory: ci/firmware
 
+  wasi:
+    name: run on wasm32-wasip1 (no threads)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
+        with:
+          toolchain: stable
+          targets: wasm32-wasip1
+      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: wasmtime
+      # WASI hosts such as VS Code's have no threads; the default features must not need them.
+      - run: cargo run --release --target wasm32-wasip1
+        working-directory: ci/wasi
+        env:
+          CARGO_TARGET_WASM32_WASIP1_RUNNER: wasmtime
+
   msrv:
     name: msrv (1.85)
     runs-on: ubuntu-latest

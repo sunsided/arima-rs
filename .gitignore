@@ -7,3 +7,5 @@
 /ci/compare/Cargo.lock
 /bindings/wasm/target
 /bindings/wasm/pkg
+/ci/wasi/target
+/ci/wasi/Cargo.lock
