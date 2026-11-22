@@ -77,6 +77,8 @@ struct Parameters {
     seasonal_ma: Vec<f64>,
     /// The mean of the differenced series, or 0.
     mean: f64,
+    /// The regression coefficients.
+    exog: Vec<f64>,
 }
 
 impl Arima {
@@ -138,16 +140,61 @@ impl Arima {
     /// [`FitError::TooShort`] if the differenced series has fewer than
     /// `p + q + P + Q + 2` non-missing values (one more with a mean).
     pub fn fit(&self, y: &[f64]) -> Result<Fitted, FitError> {
-        let w = differenced(y, &self.shape(&[], &[], &[], &[]));
-        let present = w.iter().filter(|v| !v.is_nan()).count();
-        let needed = self.coefficients() + usize::from(self.mean) + 2;
+        self.fit_exog(y, &[], 0)
+    }
+
+    /// Fits a regression with ARIMA errors: `y_t = x_t . beta + u_t`, where `u` follows
+    /// this model. `regressors` holds `columns` values per observation, row-major.
+    ///
+    /// Like R's `arima(xreg=)` and statsmodels `ARIMA(exog=)` with simple differencing,
+    /// the regressors are differenced along with `y`. `beta` starts from least squares
+    /// on the differenced data and is estimated jointly with the rest. A `NaN` regressor
+    /// makes its observation missing.
+    ///
+    /// # Errors
+    ///
+    /// - [`FitError::RegressorShape`] if `regressors` does not hold `y.len()` rows.
+    /// - [`FitError::TooShort`] if the differenced series has fewer than
+    ///   `p + q + P + Q + columns + 2` non-missing values (one more with a mean).
+    pub fn fit_exog(
+        &self,
+        y: &[f64],
+        regressors: &[f64],
+        columns: usize,
+    ) -> Result<Fitted, FitError> {
+        if regressors.len() != y.len() * columns {
+            return Err(FitError::RegressorShape {
+                expected: y.len() * columns,
+                got: regressors.len(),
+            });
+        }
+
+        let shape = self.shape(&[], &[], &[], &[]);
+        let dy = differenced(y, &shape);
+        let dx: Vec<Vec<f64>> = (0..columns)
+            .map(|j| {
+                let column: Vec<f64> = (0..y.len()).map(|t| regressors[t * columns + j]).collect();
+                differenced(&column, &shape)
+            })
+            .collect();
+        let residual = |beta: &[f64], mean: f64| -> Vec<f64> {
+            (0..dy.len())
+                .map(|t| dy[t] - dx.iter().zip(beta).map(|(x, b)| x[t] * b).sum::<f64>() - mean)
+                .collect()
+        };
+
+        let present = (0..dy.len())
+            .filter(|&t| !residual_is_missing(&dy, &dx, t))
+            .count();
+        let needed = self.coefficients() + columns + usize::from(self.mean) + 2;
         if present < needed {
             return Err(FitError::TooShort { needed, present });
         }
 
-        let start = self.start(&w);
+        let beta_start = self.least_squares_start(&dy, &dx);
+        let start = self.start(&residual(&beta_start, 0.0), &beta_start);
         let evaluate = |parameters: &Parameters| {
-            let centered: Vec<f64> = w.iter().map(|v| v - parameters.mean).collect();
+            let centered = residual(&parameters.exog, parameters.mean);
             let shape = self.shape(
                 &parameters.ar,
                 &parameters.ma,
@@ -174,6 +221,7 @@ impl Arima {
             seasonal_d: self.seasonal_d,
             seasonal_ma: parameters.seasonal_ma,
             period: self.period,
+            exog: parameters.exog,
             with_mean: self.mean,
             mean: parameters.mean,
             sigma2,
@@ -182,6 +230,38 @@ impl Arima {
             iterations: minimum.iterations,
             converged: minimum.converged,
         })
+    }
+
+    /// Least-squares regression coefficients of the differenced `dy` on the differenced
+    /// regressors `dx`, with an intercept when the mean is estimated. Zeros if the
+    /// regression fails (too few complete rows or collinear regressors).
+    fn least_squares_start(&self, dy: &[f64], dx: &[Vec<f64>]) -> Vec<f64> {
+        let columns = dx.len();
+        if columns == 0 {
+            return Vec::new();
+        }
+
+        let complete: Vec<usize> = (0..dy.len())
+            .filter(|&t| !residual_is_missing(dy, dx, t))
+            .collect();
+        let rows: Vec<Vec<f64>> = complete
+            .iter()
+            .map(|&t| {
+                let mut row: Vec<f64> = dx.iter().map(|x| x[t]).collect();
+                if self.mean {
+                    row.push(1.0);
+                }
+                row
+            })
+            .collect();
+        let targets: Vec<f64> = complete.iter().map(|&t| dy[t]).collect();
+
+        hannan_rissanen::least_squares(&rows, &targets)
+            .map(|mut b| {
+                b.truncate(columns);
+                b
+            })
+            .unwrap_or_else(|| vec![0.0; columns])
     }
 
     /// The number of AR and MA coefficients, seasonal ones included.
@@ -211,12 +291,12 @@ impl Arima {
         }
     }
 
-    /// Unconstrained starting values `[ar..., ma..., seasonal ar..., seasonal ma..., mean]`.
+    /// Unconstrained starting values `[ar..., ma..., seasonal ar..., seasonal ma..., mean, beta...]`.
     ///
     /// Hannan–Rissanen supplies the non-seasonal AR and MA parts and the sample mean the
     /// mean; the seasonal parts start at zero. A part that comes out non-stationary (or
     /// non-invertible), or a failed regression, starts at zero instead, as statsmodels does.
-    fn start(&self, w: &[f64]) -> Vec<f64> {
+    fn start(&self, w: &[f64], beta: &[f64]) -> Vec<f64> {
         let present: Vec<f64> = w.iter().copied().filter(|v| !v.is_nan()).collect();
         let sample_mean = present.iter().sum::<f64>() / present.len() as f64;
         let mean = if self.mean { sample_mean } else { 0.0 };
@@ -239,6 +319,7 @@ impl Arima {
             start.push(mean);
         }
 
+        start.extend_from_slice(beta);
         start
     }
 
@@ -259,8 +340,14 @@ impl Arima {
             seasonal_ar: negated(seasonal_ar),
             seasonal_ma: transform::constrain(seasonal_ma),
             mean: if self.mean { rest[0] } else { 0.0 },
+            exog: rest[usize::from(self.mean)..].to_vec(),
         }
     }
+}
+
+/// Whether observation `t` of the differenced data has a missing value.
+fn residual_is_missing(dy: &[f64], dx: &[Vec<f64>], t: usize) -> bool {
+    dy[t].is_nan() || dx.iter().any(|x| x[t].is_nan())
 }
 
 /// A fitted seasonal ARIMA model.
@@ -280,6 +367,8 @@ pub struct Fitted {
     pub seasonal_ma: Vec<f64>,
     /// The season length; 0 without a seasonal part.
     pub period: usize,
+    /// The regression coefficients `beta`; empty without regressors.
+    pub exog: Vec<f64>,
     /// Whether the mean of the differenced series was estimated.
     pub with_mean: bool,
     /// The mean of the differenced series; `0.0` if it was not estimated.
@@ -297,14 +386,16 @@ pub struct Fitted {
 }
 
 impl Fitted {
-    /// The number of estimated parameters: `p + q + P + Q`, one for the mean if estimated,
-    /// and one for `sigma2`. This is the `k` of the information criteria.
+    /// The number of estimated parameters: `p + q + P + Q`, the regression coefficients,
+    /// one for the mean if estimated, and one for `sigma2`. This is the `k` of the
+    /// information criteria.
     #[must_use]
     pub fn parameters(&self) -> usize {
         self.ar.len()
             + self.ma.len()
             + self.seasonal_ar.len()
             + self.seasonal_ma.len()
+            + self.exog.len()
             + usize::from(self.with_mean)
             + 1
     }
@@ -339,6 +430,10 @@ impl Fitted {
 
     /// The fitted model as a spec, for [`Filter::new`](crate::Filter::new),
     /// [`loglike`](crate::loglike) and [`innovations`](crate::innovations).
+    ///
+    /// After [`Arima::fit_exog`] the spec carries the regression coefficients, so use
+    /// [`loglike_exog`](crate::loglike_exog) and [`innovations_exog`](crate::innovations_exog)
+    /// with the original regressors instead; the plain forms panic for it.
     #[must_use]
     pub fn spec(&self) -> ArimaSpec<'_> {
         ArimaSpec {
@@ -351,6 +446,7 @@ impl Fitted {
                 ma: &self.seasonal_ma,
                 period: self.period,
             },
+            exog: &self.exog,
             mean: self.mean,
             sigma2: self.sigma2,
         }
@@ -360,9 +456,16 @@ impl Fitted {
 /// Why a model could not be fitted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FitError {
+    /// `regressors` does not hold one row of `columns` values per observation.
+    RegressorShape {
+        /// `y.len() * columns`.
+        expected: usize,
+        /// `regressors.len()`.
+        got: usize,
+    },
     /// The differenced series has too few non-missing values for the model.
     TooShort {
-        /// The values the model needs: `p + q + P + Q + 2`, plus one with a mean.
+        /// The values the model needs: `p + q + P + Q + columns + 2`, plus one with a mean.
         needed: usize,
         /// The non-missing values after differencing.
         present: usize,
@@ -372,6 +475,9 @@ pub enum FitError {
 impl Display for FitError {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         match self {
+            FitError::RegressorShape { expected, got } => {
+                write!(f, "expected {expected} regressor values, got {got}")
+            }
             FitError::TooShort { needed, present } => {
                 write!(
                     f,
@@ -426,6 +532,7 @@ mod tests {
             seasonal_d: 0,
             seasonal_ma: alloc::vec![],
             period: 0,
+            exog: alloc::vec![],
             with_mean: true,
             mean: 1.0,
             sigma2: 1.0,
@@ -441,6 +548,20 @@ mod tests {
 
         let tiny = Fitted { nobs: 6, ..fitted };
         assert_eq!(tiny.aicc(), f64::INFINITY);
+    }
+
+    #[test]
+    fn regressor_shape_is_checked() {
+        let error = Arima::new(1, 0, 0)
+            .fit_exog(&[1.0, 2.0, 3.0], &[1.0, 2.0], 1)
+            .unwrap_err();
+        assert_eq!(
+            error,
+            FitError::RegressorShape {
+                expected: 3,
+                got: 2
+            }
+        );
     }
 
     #[test]

@@ -21,6 +21,8 @@ The crate is published as `backshift`, because `arima` is taken on crates.io. Ph
 
 Phase 2 (seasonal ARIMA) is done: the filter and the likelihood expand `phi(B) Phi(B^s)`, `theta(B) Theta(B^s)` and `(1 - B)^d (1 - B^s)^D` into plain coefficient vectors, and the forecast integrates through the last `d + D s` raw values. Seasonal fits start the seasonal parts at zero.
 
+Phase 3 (exogenous regressors) is done: the ARIMA part models `u = y - X beta`, the regressors are differenced with `y` (R's `arima(xreg=)`, statsmodels' simple differencing), and `beta` is estimated jointly, starting from least squares on the differenced data.
+
 Phase 1 is complete with step 6. Two conventions differ from statsmodels' defaults on purpose and are documented in the code: the likelihood for `d > 0` uses simple differencing (as R does), and BIC and AICc count only non-missing values (as R does).
 
 Reference vectors come from `scripts/generate_reference.py`. Every quoted number in this document must be regenerated from the series in that script before a test uses it.

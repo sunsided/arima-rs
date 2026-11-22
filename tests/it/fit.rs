@@ -56,7 +56,9 @@ fn hannan_rissanen_matches_statsmodels() {
 #[test]
 fn fit_reaches_the_statsmodels_maximum() {
     for (index, case) in ALL.iter().enumerate() {
-        let fitted = model(case).fit(case.values).unwrap();
+        let fitted = model(case)
+            .fit_exog(case.values, case.regressors, case.exog.len())
+            .unwrap();
         let context = format!("case {index}: {fitted:?}");
 
         assert!(fitted.converged, "{context}");
@@ -73,7 +75,8 @@ fn fit_reaches_the_statsmodels_maximum() {
             .zip(case.fit_ar)
             .chain(fitted.ma.iter().zip(case.fit_ma))
             .chain(fitted.seasonal_ar.iter().zip(case.fit_seasonal_ar))
-            .chain(fitted.seasonal_ma.iter().zip(case.fit_seasonal_ma));
+            .chain(fitted.seasonal_ma.iter().zip(case.fit_seasonal_ma))
+            .chain(fitted.exog.iter().zip(case.fit_exog));
         for (actual, expected) in pairs {
             assert!(
                 (actual - expected).abs() <= PARAMETER_TOLERANCE,
@@ -93,7 +96,9 @@ fn fit_reaches_the_statsmodels_maximum() {
 #[test]
 fn information_criteria_match_statsmodels() {
     for (index, case) in ALL.iter().enumerate() {
-        let fitted = model(case).fit(case.values).unwrap();
+        let fitted = model(case)
+            .fit_exog(case.values, case.regressors, case.exog.len())
+            .unwrap();
 
         // Our llf sits up to about 1e-7 above statsmodels', so the criteria may differ by twice that.
         let close = |actual: f64, expected: f64| (actual - expected).abs() <= 1e-6;

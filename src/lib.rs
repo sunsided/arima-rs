@@ -61,7 +61,7 @@ pub use crate::filter::{ArimaSpec, Filter, FilterError, Seasonal};
 #[cfg(feature = "alloc")]
 pub use crate::fit::{Arima, ArmaCoefficients, FitError, Fitted, hannan_rissanen};
 #[cfg(feature = "alloc")]
-pub use crate::likelihood::{innovations, loglike};
+pub use crate::likelihood::{innovations, innovations_exog, loglike, loglike_exog};
 pub use crate::normal::normal_quantile;
 pub use crate::state_space::Innovation;
 pub use crate::time_series::{TimeSeries, TimeSeriesError};
