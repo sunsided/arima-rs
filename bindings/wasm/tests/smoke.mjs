@@ -65,4 +65,44 @@ const largeStream = new Stream(large);
 largeStream.warmUp(y);
 assert.ok(largeStream.forecast(48, 0.9).upper().every(Number.isFinite));
 
+// SARIMAX: weekly data with a holiday dummy, known for the horizon too.
+const days = 280;
+const holiday = Float64Array.from({ length: days }, (_, t) => (t % 37 === 5 ? 1 : 0));
+const users = Float64Array.from(
+  { length: days },
+  (_, t) => 1000 - 300 * (t % 7 >= 5) - 250 * holiday[t] + 15 * noise(),
+);
+const sarimax = Model.fit(users, 1, 0, 0, 0, 1, 1, 7, undefined, holiday, 1);
+assert.equal(sarimax.exog().length, 1);
+assert.ok(Math.abs(sarimax.exog()[0] + 250) < 25, `holiday effect ${sarimax.exog()[0]}`);
+const future = Float64Array.from({ length: 14 }, (_, h) => (h === 3 ? 1 : 0));
+const ahead = sarimax.forecast(users, 14, 0.95, holiday, future).mean();
+assert.equal(ahead.length, 14);
+const plainAhead = Model.fit(users, 1, 0, 0, 0, 1, 1, 7).forecast(users, 14, 0.95).mean();
+assert.ok(ahead[3] < plainAhead[3] - 150, "the known holiday lowers the forecast");
+const autoX = Model.autoArima(users, 7, holiday, 1);
+assert.equal(autoX.exog().length, 1);
+const sarimaxStream = new Stream(sarimax);
+sarimaxStream.warmUp(users, holiday);
+assert.ok(Number.isFinite(sarimaxStream.update(1000, [0])[0]));
+assert.equal(sarimaxStream.forecast(14, 0.9, future).mean().length, 14);
+assert.equal(sarimax.refit(users.slice(-140), false, holiday.slice(-140)).exog().length, 1);
+const givenX = Model.fromCoefficients([0.5], 0, [], [], 0, [], 0, 0, 1, [2]);
+assert.deepEqual([...givenX.exog()], [2]);
+assert.equal(givenX.forecast(y, 1, 0.9, new Float64Array(144), [1]).mean().length, 1);
+
+// Missing or misshapen rows throw instead of killing the instance.
+assert.throws(() => Model.fit(users, 1, 0, 0, 0, 1, 1, 7, undefined, holiday), /column count/);
+assert.throws(() => Model.fit(users, 1, 0, 0, 0, 1, 1, 7, undefined, holiday.slice(1), 1), /rows/);
+assert.throws(() => sarimax.forecast(users, 14, 0.95), /regressors/);
+assert.throws(() => sarimax.forecast(users, 14, 0.95, holiday), /horizon/);
+assert.throws(() => sarimaxStream.update(1000), /regressors/);
+assert.throws(() => sarimaxStream.update(1000, [0, 1]), /regressors/);
+assert.throws(() => sarimaxStream.warmUp(users), /regressors/);
+assert.throws(() => sarimaxStream.forecast(14, 0.9), /regressors/);
+assert.throws(() => sarimax.refit(users, false), /regressors/);
+assert.throws(() => airline.forecast(y, 3, 0.9, new Float64Array(144), [1, 1, 1]), /no regressors/);
+assert.throws(() => Model.fromCoefficients([0.5], 0, [], [], 0, [], 0, 0, 1, new Array(65).fill(0)), /columns/);
+assert.ok(sarimaxStream.update(1000, [1])[1] > 0, "the instance survives the errors");
+
 console.log(`smoke: ok (${auto.label()}, AICc ${auto.aicc.toFixed(2)})`);
