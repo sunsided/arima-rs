@@ -1,4 +1,4 @@
-use crate::{math, Estimator};
+use crate::{Estimator, math};
 use core::cell::Cell;
 use core::error::Error;
 use core::fmt::{Display, Formatter};
@@ -110,7 +110,7 @@ impl<'a> TimeSeries<'a> {
     }
 
     /// Calculates the residuals, i.e. the deviations from the mean.
-    pub fn residuals(&self) -> impl Iterator<Item = f64> + 'a {
+    pub fn residuals(&self) -> impl Iterator<Item = f64> + use<'a> {
         let mean = self.mean();
         self.values.iter().map(move |x| x - mean)
     }
