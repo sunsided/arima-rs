@@ -3,3 +3,5 @@
 /.idea
 /ci/firmware/target
 /ci/firmware/Cargo.lock
+/ci/compare/target
+/ci/compare/Cargo.lock

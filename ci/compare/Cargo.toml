@@ -1,0 +1,21 @@
+# Compares backshift with other Rust ARIMA crates: fit time and the exact log-likelihood
+# each crate's estimates reach. Not part of the published package; run with
+#     cargo run --release --manifest-path ci/compare/Cargo.toml
+[package]
+name = "backshift-compare"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+backshift = { path = "../.." }
+foresight = "=0.7.3"
+anofox-forecast = "=0.21.0"
+chrono = "0.4"
+
+[features]
+# Run backshift's auto-ARIMA neighbour fits in parallel.
+rayon = ["backshift/rayon"]
+
+# Keep this crate out of any parent workspace.
+[workspace]

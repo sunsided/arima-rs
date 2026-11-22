@@ -21,7 +21,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `stl` and `Decomposition`: STL decomposition matching statsmodels' `STL`, with `seasonal_strength`.
 - `kpss_short_lags`; `ndiffs` now uses it (as pmdarima and R's tseries do), which gives KPSS more power on short
   series.
-- The `rayon` feature fits the candidates of an exhaustive `AutoArima` search in parallel.
+- The `rayon` feature fits the candidates of an exhaustive `AutoArima` search in parallel, and the neighbours of a
+  seasonal stepwise search speculatively (with identical results).
+- Criterion benchmarks (`cargo bench`) and `ci/compare`, a comparison with foresight and anofox-forecast.
+
+### Performance
+
+- The Lyapunov solve uses branch-free, symmetry-aware matrix products, and the Kalman predict and update steps skip
+  the redundant half of the symmetric covariance: about 4x faster starting covariances and 1.5x faster likelihoods.
+- The fitting objective freezes the covariance once the filter converges (statsmodels' 1e-19 tolerance), so long
+  series cost `O(r)` per step; `loglike`, `innovations` and the filter keep the full recursion.
 
 ### Changed
 
