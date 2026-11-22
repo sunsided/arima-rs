@@ -497,6 +497,7 @@ STL_CASES = [
     ("QUARTERLY", "Twelve years of a quarterly pattern on a trend.", 4, 12, 31),
     ("WEEKLY", "Five weeks of a daily pattern (period 7).", 7, 5, 32),
     ("MONTHLY", "Six years of a monthly pattern.", 12, 6, 33),
+    ("ELEVEN", "Five cycles of period 11, whose trend window minimum is exactly 21.", 11, 5, 34),
 ]
 
 

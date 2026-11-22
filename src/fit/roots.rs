@@ -60,6 +60,10 @@ const MAX_SWEEPS: usize = 500;
 ///
 /// The inverse roots are the roots of `z^n + a_1 z^(n-1) + ... + a_n`, found with the
 /// Durand–Kerner (Weierstrass) iteration. Returns 0 for an empty polynomial.
+///
+/// Fails closed: if the iteration breaks down (two iterates coincide, so a step divides
+/// by zero), the result is `+inf`, so the caller rejects the candidate rather than
+/// accepting it on a partial set of roots.
 pub(crate) fn max_inverse_root(a: &[f64]) -> f64 {
     let n = a.len();
     if n == 0 {
@@ -91,6 +95,10 @@ pub(crate) fn max_inverse_root(a: &[f64]) -> f64 {
         if largest_step < 1e-14 {
             break;
         }
+    }
+
+    if roots.iter().any(|z| !z.re.is_finite() || !z.im.is_finite()) {
+        return f64::INFINITY;
     }
 
     roots.iter().fold(0.0, |m, z| m.max(z.abs()))
@@ -127,5 +135,19 @@ mod tests {
         let a = [0.0, 0.0, 0.0, -0.5];
         assert!((max_inverse_root(&a) - 0.5_f64.powf(0.25)).abs() < 1e-12);
         assert_eq!(max_inverse_root(&[]), 0.0);
+    }
+
+    #[test]
+    fn repeated_unit_root_is_not_missed() {
+        // (1 - z)^2: a double inverse root at 1, on the unit circle.
+        assert!(max_inverse_root(&[-2.0, 1.0]) > 0.99);
+        // (1 - 0.5 z)^2: a double inverse root at 0.5.
+        assert!((max_inverse_root(&[-1.0, 0.25]) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn breakdown_fails_closed() {
+        // A NaN coefficient poisons every iterate; the check must reject, not return 0.
+        assert_eq!(max_inverse_root(&[f64::NAN, 0.1]), f64::INFINITY);
     }
 }

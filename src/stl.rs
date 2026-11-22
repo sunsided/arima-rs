@@ -99,8 +99,8 @@ struct Windows {
 }
 
 impl Windows {
-    /// statsmodels' defaults for `period`: seasonal 7, trend the smallest odd integer
-    /// above `1.5 period / (1 - 1.5 / 7)`, low-pass the smallest odd integer above `period`.
+    /// statsmodels' defaults for `period`: seasonal 7, trend the smallest odd integer at
+    /// least `1.5 period / (1 - 1.5 / 7)`, low-pass the smallest odd integer above `period`.
     fn defaults(period: usize) -> Self {
         let seasonal = 7;
         let trend_minimum = 1.5 * period as f64 / (1.0 - 1.5 / seasonal as f64);
@@ -113,9 +113,17 @@ impl Windows {
             candidate
         };
 
+        // The trend window may equal its minimum when that is an odd integer (period 11
+        // gives exactly 21), so round up first; the low-pass window is strictly above `period`.
+        let truncated = trend_minimum as usize;
+        let mut trend = truncated + usize::from(trend_minimum > truncated as f64);
+        if trend % 2 == 0 {
+            trend += 1;
+        }
+
         Self {
             seasonal,
-            trend: next_odd_above(trend_minimum),
+            trend,
             low_pass: next_odd_above(period as f64),
         }
     }
@@ -301,6 +309,10 @@ mod tests {
         assert_eq!((w.trend, w.low_pass), (9, 5));
         let w = Windows::defaults(7);
         assert_eq!((w.trend, w.low_pass), (15, 9));
+        // 1.5 * 11 / (1 - 1.5 / 7) is exactly 21, which statsmodels keeps.
+        let w = Windows::defaults(11);
+        assert_eq!((w.trend, w.low_pass), (21, 13));
+        assert_eq!(Windows::defaults(33).trend, 63);
     }
 
     #[test]
