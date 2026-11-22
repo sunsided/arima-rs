@@ -80,7 +80,7 @@ jobs:
       - run: cargo check --lib --no-default-features --features libm,alloc
 
   wasm-package:
-    name: npm package (wasm)
+    name: npm package and demo site (wasm)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -105,4 +105,12 @@ jobs:
       - run: node bindings/wasm/tests/smoke.mjs
       - run: npm pack --dry-run
         working-directory: bindings/wasm/pkg
+      # The demo site consumes the package just built, as npm users would.
+      - name: Check and build the demo site
+        working-directory: site
+        run: |
+          corepack enable
+          yarn install --immutable
+          yarn check
+          yarn build
 
