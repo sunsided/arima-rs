@@ -1,4 +1,4 @@
-# Competitive plan: an ARIMA crate that wins on one thing first
+# Plan: an ARIMA crate that leads on one thing first
 
 Research date: 2026-11-22. Toolchain used for checks: rustc 1.100.0, statsmodels 0.14.0 (numpy 1.24.3, scipy 1.11.1).
 Evidence sources: crates.io API (metadata, `.crate` downloads from static.crates.io), the downloaded crate sources,
@@ -59,7 +59,7 @@ Every one of these is now table stakes, not a differentiator.
 - Log-likelihood, AIC, AICc and BIC.
 - A heap-free streaming `Filter`.
 
-## 1. Competitor comparison
+## 1. Comparison with other ARIMA crates
 
 Dependency counts are unique transitive normal dependencies with default features, excluding the crate itself.
 "no_std" means it builds for `thumbv7em-none-eabihf`, which was tested only for the four smallest crates. All other
@@ -377,7 +377,7 @@ Re-check the chosen name right before `cargo publish`, because names can be clai
    - Because the `core` float methods are not available (tested), the `no_std` build depends on `libm`.
    - `libm` results can differ from the platform `libm` in the last ulp, so tier-A tests must run in both configurations.
    - Do not claim "zero dependencies" for the `no_std` build. Claim "zero dependencies by default; `no_std` needs only `libm`".
-5. **Competitive speed.** `foresight` (same zero-dep philosophy, R-validated) and `anofox-forecast` (76 releases, very active) ship features fast. A faster SARIMA/auto-ARIMA cannot win against them. Only the embedded and streaming design is defensible, so ship phase 1 before widening scope.
+5. **Pace of other crates.** `foresight` (same zero-dep philosophy, R-validated) and `anofox-forecast` (76 releases, very active) ship features fast. A faster SARIMA/auto-ARIMA alone would not stand out next to them. Only the embedded and streaming design is defensible, so ship phase 1 before widening scope.
 
 ## 6. Could not verify
 
@@ -386,4 +386,4 @@ Re-check the chosen name right before `cargo publish`, because names can be clai
 - **Untested builds.** The `wasm32` and `no_std` builds of `anofox-forecast`, `scirs2-series`, `chronos-ts` and other heavy crates were not compiled. Their `std`-only dependencies (rayon, chrono, ndarray, faer, nalgebra with std) make `no_std` very unlikely.
 - **R checks.** R `forecast::auto.arima` reference orders could not be generated locally, because neither R nor `pmdarima` is installed.
 - **Full `no_std` sweep.** A crates.io-wide sweep for `no_std` ARIMA crates was not possible beyond keyword searches. "Unique" means unique among the 13 ARIMA crates inspected plus the generic Kalman crates found by search.
-- **No competitor ran.** I did not run any competitor's test suite or benchmark. Claims of "matches R" come from their test files and READMEs.
+- **No other crate ran.** I did not run the other crates' test suites or benchmarks. Claims of "matches R" come from their test files and READMEs.
