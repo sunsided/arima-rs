@@ -1,7 +1,8 @@
 <script lang="ts">
-	// The demo page: loads the WebAssembly package in the browser, then shows the three
+	// The demo page: loads the WebAssembly package in the browser, then shows the
 	// panels. The page is prerendered; the wasm only runs on the client.
 	import { onMount } from 'svelte';
+	import CalendarPanel from '#lib/components/CalendarPanel.svelte';
 	import DriftPanel from '#lib/components/DriftPanel.svelte';
 	import ForecastPanel from '#lib/components/ForecastPanel.svelte';
 	import StreamPanel from '#lib/components/StreamPanel.svelte';
@@ -42,6 +43,7 @@
 		<p class="error" role="alert">Could not load the WebAssembly module: {failure}</p>
 	{:else if api}
 		<ForecastPanel />
+		<CalendarPanel {api} />
 		<StreamPanel {api} />
 		<DriftPanel {api} />
 	{:else}

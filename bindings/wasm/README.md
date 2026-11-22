@@ -35,11 +35,17 @@ const isAnomaly = Math.abs(innovation) > 3 * Math.sqrt(variance);
 
 - `Model.fit(values, p, d, q, P, D, Q, period, mean?)` fits one model and `Model.autoArima(values, period)` searches for
   one; `NaN` marks a missing value.
-- `Model` exposes the coefficients (`ar()`, `ma()`, `seasonalAr()`, `seasonalMa()`), `mean`, `sigma2`, `loglike`,
+- `Model` exposes the coefficients (`ar()`, `ma()`, `seasonalAr()`, `seasonalMa()`, `exog()`), `mean`, `sigma2`, `loglike`,
   `aic`, `aicc`, `bic` and `label()`.
 - `Model.fromCoefficients(ar, d, ma, seasonalAr, D, seasonalMa, period, mean, sigma2)` takes a model fitted elsewhere
   (statsmodels, R) in their sign convention, to stream and forecast without fitting.
 - `model.refit(window, mean)` re-estimates the model on recent values, warm-started from the current one.
+- Regressors (SARIMAX, regression with ARIMA errors as in R's `arima(xreg=)`): pass one row-major `Float64Array`
+  with a row per value, `Model.fit(values, p, d, q, P, D, Q, period, mean, regressors, columns)` or
+  `Model.autoArima(values, period, regressors, columns)`. `model.exog()` returns the coefficients. Forecasts need the
+  rows of the history and of the horizon, `model.forecast(history, horizon, level, regressors, future)`; a `Stream`
+  takes them in `warmUp(values, regressors)`, `update(value, row)` and `forecast(horizon, level, future)`, and
+  `refit(window, mean, regressors)` and `fromCoefficients(..., sigma2, exog)` take them too.
 - `ljungBox(residuals, lags, modelDf)` returns `[statistic, pValue]`.
 
 Invalid input throws an `Error` with a message; nothing panics. Streaming and forecasts hold the model in a fixed

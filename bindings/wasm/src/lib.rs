@@ -3,7 +3,8 @@
 //!
 //! Every export validates its input and returns a `JsError` instead of panicking, since
 //! a panic would kill the whole wasm instance. Series cross the boundary as
-//! `Float64Array`; `NaN` marks a missing value.
+//! `Float64Array`; `NaN` marks a missing value. Regressors (SARIMAX: regression with
+//! ARIMA errors) cross as one row-major `Float64Array` with a row per value.
 //!
 //! ```mermaid
 //! flowchart LR
@@ -41,6 +42,10 @@ const MAX_PERIOD: usize = 366;
 /// the square of the state count. The airline model at period 52 needs 107.
 const MAX_STATES: usize = 128;
 
+/// The most regressor columns a model may have: the filter holds one coefficient per
+/// column within its capacity.
+const MAX_COLUMNS: usize = CAPACITY;
+
 /// The streaming filter the bindings use.
 type DeviceFilter = Filter<CAPACITY>;
 
@@ -60,10 +65,15 @@ impl Model {
     /// out, it is estimated for `d + D = 0` only, as in statsmodels and R. Pass
     /// `P = D = Q = 0` and `period = 0` for a non-seasonal model.
     ///
+    /// `regressors` adds `columns` regressors (SARIMAX): one row per value, row-major. The
+    /// model is regression with ARIMA errors, as R's `arima(xreg=)`: the ARIMA part models
+    /// `y - x . beta`, with `beta` estimated jointly.
+    ///
     /// # Errors
     ///
     /// When the input is too long, an order is out of range, a seasonal part has no
-    /// period, or the series is too short or degenerate for the model.
+    /// period, the regressors do not hold one row per value, or the series is too short
+    /// or degenerate for the model.
     #[expect(
         clippy::too_many_arguments,
         reason = "JavaScript has no builder here; the orders are plain numbers"
@@ -78,8 +88,11 @@ impl Model {
         seasonal_q: usize,
         period: usize,
         mean: Option<bool>,
+        regressors: Option<Vec<f64>>,
+        columns: Option<usize>,
     ) -> Result<Model, JsError> {
         check_values(values)?;
+        let (regressors, columns) = regressor_matrix(regressors, columns, values.len())?;
         check_orders(p, d, q)?;
         check_orders(seasonal_p, seasonal_d, seasonal_q)?;
         let seasonal = seasonal_p + seasonal_d + seasonal_q > 0;
@@ -100,20 +113,30 @@ impl Model {
             Some(include) => model.mean(include),
             None => model,
         };
-        let fitted = model.fit(values).map_err(error)?;
+        let fitted = model
+            .fit_exog(values, &regressors, columns)
+            .map_err(error)?;
 
         Ok(Model { fitted })
     }
 
     /// Selects and fits a model with the stepwise search of R's `auto.arima`; `period`
-    /// is the season length, or 0 (or 1) for a non-seasonal search.
+    /// is the season length, or 0 (or 1) for a non-seasonal search. `regressors` and
+    /// `columns` as in [`Model::fit`].
     ///
     /// # Errors
     ///
-    /// When the input is too long, the period is out of range, or no candidate fits.
+    /// When the input is too long, the period is out of range, the regressors do not hold
+    /// one row per value, or no candidate fits.
     #[wasm_bindgen(js_name = autoArima)]
-    pub fn auto_arima(values: &[f64], period: usize) -> Result<Model, JsError> {
+    pub fn auto_arima(
+        values: &[f64],
+        period: usize,
+        regressors: Option<Vec<f64>>,
+        columns: Option<usize>,
+    ) -> Result<Model, JsError> {
         check_values(values)?;
+        let (regressors, columns) = regressor_matrix(regressors, columns, values.len())?;
         if period > MAX_PERIOD {
             return Err(JsError::new(&format!(
                 "the period must be at most {MAX_PERIOD}"
@@ -141,7 +164,9 @@ impl Model {
         } else {
             AutoArima::new()
         };
-        let best = search.fit(values).map_err(error)?;
+        let best = search
+            .fit_exog(values, &regressors, columns)
+            .map_err(error)?;
 
         Ok(Model {
             fitted: best.fitted,
@@ -152,12 +177,14 @@ impl Model {
     /// their sign convention: `phi(B) Phi(B^s) w_t = theta(B) Theta(B^s) e_t` with
     /// `w_t = (1 - B)^d (1 - B^s)^D y_t - mean` and `Var(e_t) = sigma2`. It streams and
     /// forecasts like a fitted model; its likelihood, AIC and BIC are `NaN` and its AICc is
-    /// infinite.
+    /// infinite. `exog` holds the regression coefficients `beta` of a model with regressors,
+    /// which then models `y - x . beta`.
     ///
     /// # Errors
     ///
     /// When a coefficient is not finite, `sigma2` is not positive, a seasonal part has no
-    /// period, an order is out of range, or the AR part is not stationary.
+    /// period, an order is out of range, there are too many regression coefficients, or
+    /// the AR part is not stationary.
     #[wasm_bindgen(js_name = fromCoefficients)]
     #[expect(
         clippy::too_many_arguments,
@@ -173,8 +200,11 @@ impl Model {
         period: usize,
         mean: f64,
         sigma2: f64,
+        exog: Option<Vec<f64>>,
     ) -> Result<Model, JsError> {
         check_orders(ar.len(), d, ma.len())?;
+        let exog = exog.unwrap_or_default();
+        check_columns(exog.len())?;
         check_orders(seasonal_ar.len(), seasonal_d, seasonal_ma.len())?;
         let seasonal = !seasonal_ar.is_empty() || seasonal_d > 0 || !seasonal_ma.is_empty();
         if seasonal && !(2..=MAX_PERIOD).contains(&period) {
@@ -201,7 +231,7 @@ impl Model {
             seasonal_d,
             seasonal_ma,
             period: if seasonal { period } else { 0 },
-            exog: Vec::new(),
+            exog,
             with_mean: mean != 0.0,
             mean,
             sigma2,
@@ -212,7 +242,7 @@ impl Model {
         };
         // The likelihood of no data checks every parameter and the stationarity of the AR
         // part, with no limit on the state count.
-        backshift::loglike(&[], &fitted.spec()).map_err(error)?;
+        backshift::loglike_exog(&[], &[], &fitted.spec()).map_err(error)?;
 
         Ok(Model { fitted })
     }
@@ -269,6 +299,13 @@ impl Model {
     #[must_use]
     pub fn seasonal_ma(&self) -> Vec<f64> {
         self.fitted.seasonal_ma.clone()
+    }
+
+    /// The regression coefficients `beta`, one per regressor column; empty without
+    /// regressors.
+    #[must_use]
+    pub fn exog(&self) -> Vec<f64> {
+        self.fitted.exog.clone()
     }
 
     /// The differencing order `d`.
@@ -350,32 +387,44 @@ impl Model {
     }
 
     /// Forecasts the `horizon` values after `history` with central prediction intervals
-    /// at probability `level` (for example 0.95).
+    /// at probability `level` (for example 0.95). A model with regressors needs their rows
+    /// for the history (`regressors`) and for the horizon (`future`), row-major.
     ///
     /// # Errors
     ///
-    /// When `history` is too long, `horizon` is out of range, or the model needs more
-    /// than 64 states.
+    /// When `history` is too long, `horizon` is out of range, the regressor rows do not
+    /// match the model, or the model needs more than 64 states.
     pub fn forecast(
         &self,
         history: &[f64],
         horizon: usize,
         level: f64,
+        regressors: Option<Vec<f64>>,
+        future: Option<Vec<f64>>,
     ) -> Result<Forecast, JsError> {
         check_values(history)?;
         let mut stream = Stream::new(self)?;
-        stream.warm_up(history);
-        stream.forecast(horizon, level)
+        stream.warm_up(history, regressors)?;
+        stream.forecast(horizon, level, future)
     }
 
     /// Re-estimates the coefficients on `window`, warm-started from this model, through
     /// the heap-free refit a device would run. `mean` keeps the mean (or drift) estimated.
+    /// A model with regressors needs their rows for the window, row-major.
     ///
     /// # Errors
     ///
-    /// When the window is too long, too short or degenerate for the model.
-    pub fn refit(&self, window: &[f64], mean: bool) -> Result<Model, JsError> {
+    /// When the window is too long, too short or degenerate for the model, or the
+    /// regressor rows do not match it.
+    pub fn refit(
+        &self,
+        window: &[f64],
+        mean: bool,
+        regressors: Option<Vec<f64>>,
+    ) -> Result<Model, JsError> {
         check_values(window)?;
+        let regressors = regressors.unwrap_or_default();
+        check_rows(&regressors, window.len(), self.fitted.exog.len(), "window")?;
         let spec = self.fitted.spec();
         let options = RefitOptions {
             mean,
@@ -384,7 +433,13 @@ impl Model {
         let mut coefficients = vec![0.0; spec.coefficient_len()];
         let mut scratch = vec![0.0; spec.refit_scratch_len(window.len(), options)];
         let refit = spec
-            .refit(window, options, &mut coefficients, &mut scratch)
+            .refit_exog(
+                window,
+                &regressors,
+                options,
+                &mut coefficients,
+                &mut scratch,
+            )
             .map_err(error)?;
         let new = refit.spec;
         let fitted = Fitted {
@@ -392,6 +447,7 @@ impl Model {
             ma: new.ma.to_vec(),
             seasonal_ar: new.seasonal.ar.to_vec(),
             seasonal_ma: new.seasonal.ma.to_vec(),
+            exog: new.exog.to_vec(),
             with_mean: mean,
             mean: new.mean,
             sigma2: new.sigma2,
@@ -445,6 +501,8 @@ impl Forecast {
 pub struct Stream {
     /// The filter, boxed so its 35 KB of state stays off the wasm stack.
     filter: Box<DeviceFilter>,
+    /// The model's regressor columns: every update needs a row of this many values.
+    columns: usize,
 }
 
 #[wasm_bindgen]
@@ -460,40 +518,69 @@ impl Stream {
         let filter = DeviceFilter::new(&spec).map_err(error)?;
         Ok(Stream {
             filter: Box::new(filter),
+            columns: spec.exog.len(),
         })
     }
 
-    /// Feeds every value of `values`, discarding the innovations.
+    /// Feeds every value of `values`, discarding the innovations. A model with regressors
+    /// needs one row per value, row-major.
+    ///
+    /// # Errors
+    ///
+    /// When `values` is too long or the regressor rows do not match the model.
     #[wasm_bindgen(js_name = warmUp)]
-    pub fn warm_up(&mut self, values: &[f64]) {
-        self.filter.warm_up(values);
+    pub fn warm_up(&mut self, values: &[f64], regressors: Option<Vec<f64>>) -> Result<(), JsError> {
+        check_values(values)?;
+        let regressors = regressors.unwrap_or_default();
+        check_rows(&regressors, values.len(), self.columns, "values")?;
+        self.filter.warm_up_exog(values, &regressors);
+        Ok(())
     }
 
     /// Feeds one value and returns `[innovation, variance]`, or `undefined` while the
     /// first `d + D s` values only prime the differencing. A `NaN` value counts as
-    /// missing; its innovation is `NaN`.
-    pub fn update(&mut self, value: f64) -> Option<Vec<f64>> {
-        self.filter
-            .update(value)
-            .map(|innovation| vec![innovation.value, innovation.variance])
-    }
-
-    /// Forecasts the next `horizon` values with central prediction intervals at `level`.
+    /// missing; its innovation is `NaN`. A model with regressors needs the value's row.
     ///
     /// # Errors
     ///
-    /// When `horizon` is 0 or above 10,000.
-    pub fn forecast(&self, horizon: usize, level: f64) -> Result<Forecast, JsError> {
+    /// When the regressor row does not match the model.
+    pub fn update(
+        &mut self,
+        value: f64,
+        row: Option<Vec<f64>>,
+    ) -> Result<Option<Vec<f64>>, JsError> {
+        let row = row.unwrap_or_default();
+        check_rows(&row, 1, self.columns, "value")?;
+        Ok(self
+            .filter
+            .update_exog(value, &row)
+            .map(|innovation| vec![innovation.value, innovation.variance]))
+    }
+
+    /// Forecasts the next `horizon` values with central prediction intervals at `level`.
+    /// A model with regressors needs their rows for the horizon (`future`), row-major.
+    ///
+    /// # Errors
+    ///
+    /// When `horizon` is 0 or above 10,000, or the future rows do not match the model.
+    pub fn forecast(
+        &self,
+        horizon: usize,
+        level: f64,
+        future: Option<Vec<f64>>,
+    ) -> Result<Forecast, JsError> {
         if horizon == 0 || horizon > MAX_HORIZON {
             return Err(JsError::new(&format!(
                 "the horizon must be between 1 and {MAX_HORIZON}"
             )));
         }
 
+        let future = future.unwrap_or_default();
+        check_rows(&future, horizon, self.columns, "horizon")?;
         let (mut mean, mut lower, mut upper) =
             (vec![0.0; horizon], vec![0.0; horizon], vec![0.0; horizon]);
         self.filter
-            .forecast_interval_into(level, &mut mean, &mut lower, &mut upper);
+            .forecast_interval_exog_into(level, &future, &mut mean, &mut lower, &mut upper);
         Ok(Forecast { mean, lower, upper })
     }
 }
@@ -523,6 +610,58 @@ fn check_values(values: &[f64]) -> Result<(), JsError> {
     }
 
     Ok(())
+}
+
+/// The regressor matrix of a fit: `regressors` must hold `rows` rows of `columns`
+/// values. Without regressors it is empty with no columns.
+fn regressor_matrix(
+    regressors: Option<Vec<f64>>,
+    columns: Option<usize>,
+    rows: usize,
+) -> Result<(Vec<f64>, usize), JsError> {
+    let (regressors, columns) = match (regressors, columns) {
+        (None, None | Some(0)) => return Ok((Vec::new(), 0)),
+        (Some(regressors), Some(columns)) => (regressors, columns),
+        (Some(_), None) => {
+            return Err(JsError::new("regressors need their column count"));
+        }
+        (None, Some(_)) => return Err(JsError::new("a column count needs regressors")),
+    };
+    check_columns(columns)?;
+    check_rows(&regressors, rows, columns, "values")?;
+
+    Ok((regressors, columns))
+}
+
+/// Rejects more than [`MAX_COLUMNS`] regressor columns.
+fn check_columns(columns: usize) -> Result<(), JsError> {
+    if columns > MAX_COLUMNS {
+        return Err(JsError::new(&format!(
+            "at most {MAX_COLUMNS} regressor columns are supported"
+        )));
+    }
+
+    Ok(())
+}
+
+/// Rejects regressor rows that do not hold `rows` rows of the model's `columns` values;
+/// `what` names what the rows go with, for the message.
+fn check_rows(regressors: &[f64], rows: usize, columns: usize, what: &str) -> Result<(), JsError> {
+    let expected = rows.checked_mul(columns);
+    if expected == Some(regressors.len()) {
+        return Ok(());
+    }
+
+    Err(if columns == 0 {
+        JsError::new("the model has no regressors; pass none")
+    } else {
+        JsError::new(&format!(
+            "the model has {columns} regressors: pass {rows} rows of {columns} values for the {what}, \
+             {} in all, not {}",
+            rows.saturating_mul(columns),
+            regressors.len()
+        ))
+    })
 }
 
 /// Rejects AR or MA orders above [`MAX_ORDER`] and differencing above [`MAX_DIFFERENCING`].

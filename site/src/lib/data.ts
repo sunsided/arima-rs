@@ -88,6 +88,50 @@ export function regimeChange(n: number, change: number, before: number, after: n
 	return y;
 }
 
+/** Two years of daily active users, interrupted by bank holidays and server outages. */
+export interface ActiveUsers {
+	values: number[];
+	/** The regressor rows, row-major: `[holiday, outage]` per day. */
+	regressors: number[];
+	holidays: number[];
+	outages: number[];
+	/** The users lost on a holiday and during an outage. */
+	effects: { holiday: number; outage: number };
+}
+
+/**
+ * Daily active users with quiet weekends, carried by seasonal ARIMA noise
+ * `(1 - 0.5 B)(1 - B^7) u_t = (1 - 0.6 B^7) e_t` with `sigma = 15`, minus 250 users on
+ * a bank holiday and 400 during an outage: the scenario of `examples/holidays_outages.rs`.
+ */
+export function activeUsers(seed = 7, days = 730): ActiveUsers {
+	const e = normal(seed);
+	const holidays = [0, 88, 91, 120, 129, 139, 275, 358, 359, 364, 365, 453, 456, 485, 494, 504, 640, 723, 724, 729];
+	const outages = [212, 401, 602, 603];
+	const effects = { holiday: -250, outage: -400 };
+	// Monday to Sunday.
+	const week = [1000, 1040, 1050, 1030, 980, 700, 650];
+	const [phi, theta, sigma] = [0.5, -0.6, 15];
+	const shocks: number[] = [];
+	const u: number[] = [];
+	let z = 0;
+	for (let t = 0; t < days; t++) {
+		const shock = sigma * e();
+		shocks.push(shock);
+		if (t < 7) {
+			u.push(week[t] + shock);
+			continue;
+		}
+		// z = (1 - B^7) u follows an ARMA(1, 0)(0, 1) model.
+		z = phi * z + shock + theta * shocks[t - 7];
+		u.push(u[t - 7] + z);
+	}
+
+	const regressors = u.flatMap((_, t) => [Number(holidays.includes(t)), Number(outages.includes(t))]);
+	const values = u.map((value, t) => value + regressors[2 * t] * effects.holiday + regressors[2 * t + 1] * effects.outage);
+	return { values, regressors, holidays, outages, effects };
+}
+
 /** A field separator: a comma, semicolon or tab with any spaces after it, or spaces. */
 const FIELD = /[,;\t] *| +/;
 
