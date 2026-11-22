@@ -27,7 +27,7 @@ extern crate std;
 pub use crate::autoregressive::{ArCoefficients, burg, yule_walker};
 #[cfg(feature = "alloc")]
 pub use crate::difference::{difference, integrate};
-pub use crate::filter::{ArmaSpec, Filter, FilterError};
+pub use crate::filter::{ArimaSpec, Filter, FilterError};
 #[cfg(feature = "alloc")]
 pub use crate::likelihood::{innovations, loglike};
 pub use crate::state_space::Innovation;

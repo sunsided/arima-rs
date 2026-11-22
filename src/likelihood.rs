@@ -1,27 +1,32 @@
-//! The exact Gaussian log-likelihood of an ARMA model, for any state dimension.
+//! The exact Gaussian log-likelihood of an ARIMA model, for any state dimension.
 //!
 //! This is the runtime-sized twin of [`Filter`](crate::Filter): the same recursion
 //! from [`state_space`](crate::state_space), on `Vec` buffers sized to the model.
+//! The series is differenced first (simple differencing, as R's `arima` does).
 
-use crate::filter::{ArmaSpec, FilterError};
+use crate::difference::difference;
+use crate::filter::{ArimaSpec, FilterError};
 use crate::math;
 use crate::state_space::{self, Innovation, LyapunovScratch, System};
 use alloc::vec;
 use alloc::vec::Vec;
 
-/// Runs the filter over `y` from the stationary start and returns every innovation.
+/// Runs the filter over `diff(y, d) - mean` from the stationary start and returns
+/// every innovation: `y.len() - d` of them, or none if `y` is shorter.
 ///
-/// Matches statsmodels `SARIMAX(y, order=(p, 0, q), trend="n").filter(params)`:
+/// Matches statsmodels `SARIMAX(diff(y, d) - mean, order=(p, 0, q), trend="n").filter(params)`:
 /// `value` is `forecasts_error` and `variance` is `forecasts_error_cov`. `NaN`
-/// observations count as missing.
+/// observations count as missing. For `d = 0` this is statsmodels
+/// `ARIMA(y, order=(p, 0, q), trend="c")` with `const = mean`.
 ///
 /// # Errors
 ///
 /// [`FilterError::InvalidParameter`] or [`FilterError::NonStationary`], as for
 /// [`Filter::new`](crate::Filter::new). There is no capacity limit.
-pub fn innovations(y: &[f64], spec: &ArmaSpec<'_>) -> Result<Vec<Innovation>, FilterError> {
-    let mut result = Vec::with_capacity(y.len());
-    Workspace::new(spec)?.run(y, |innovation| result.push(innovation));
+pub fn innovations(y: &[f64], spec: &ArimaSpec<'_>) -> Result<Vec<Innovation>, FilterError> {
+    let w = demeaned_difference(y, spec);
+    let mut result = Vec::with_capacity(w.len());
+    Workspace::new(spec)?.run(&w, |innovation| result.push(innovation));
 
     Ok(result)
 }
@@ -29,8 +34,12 @@ pub fn innovations(y: &[f64], spec: &ArmaSpec<'_>) -> Result<Vec<Innovation>, Fi
 /// The exact Gaussian log-likelihood of `y` under the model.
 ///
 /// `-0.5 * sum(ln(2 pi) + ln F_t + v_t^2 / F_t)` over the innovations `v_t` with
-/// variances `F_t`, skipping missing (`NaN`) observations. Matches statsmodels
-/// `SARIMAX(y, order=(p, 0, q), trend="n").loglike(params)`.
+/// variances `F_t` of [`innovations`], skipping missing (`NaN`) observations.
+///
+/// For `d > 0` this differs from statsmodels' default `ARIMA(y, order=(p, d, q))`,
+/// which keeps the first `d` values in the likelihood through a diffuse start, by
+/// a small amount (about 1e-5 on 60 values). It equals statsmodels with
+/// `simple_differencing=True` and R's `arima`.
 ///
 /// # Errors
 ///
@@ -39,22 +48,34 @@ pub fn innovations(y: &[f64], spec: &ArmaSpec<'_>) -> Result<Vec<Innovation>, Fi
 /// # Examples
 ///
 /// ```
-/// use backshift::{loglike, ArmaSpec};
+/// use backshift::{loglike, ArimaSpec};
 ///
 /// // White noise with variance 1: each term is ln(2 pi) + y^2.
-/// let llf = loglike(&[0.0, 0.0], &ArmaSpec { ar: &[], ma: &[], sigma2: 1.0 }).unwrap();
+/// let spec = ArimaSpec { ar: &[], d: 0, ma: &[], mean: 0.0, sigma2: 1.0 };
+/// let llf = loglike(&[0.0, 0.0], &spec).unwrap();
 /// assert!((llf + std::f64::consts::TAU.ln()).abs() < 1e-12);
 /// ```
-pub fn loglike(y: &[f64], spec: &ArmaSpec<'_>) -> Result<f64, FilterError> {
+pub fn loglike(y: &[f64], spec: &ArimaSpec<'_>) -> Result<f64, FilterError> {
+    let w = demeaned_difference(y, spec);
     let ln_two_pi = math::ln(core::f64::consts::TAU);
     let mut sum = 0.0;
-    Workspace::new(spec)?.run(y, |Innovation { value, variance }| {
+    Workspace::new(spec)?.run(&w, |Innovation { value, variance }| {
         if !value.is_nan() {
             sum += ln_two_pi + math::ln(variance) + value * value / variance;
         }
     });
 
     Ok(-0.5 * sum)
+}
+
+/// `diff(y, d) - mean`: the series the ARMA part models.
+fn demeaned_difference(y: &[f64], spec: &ArimaSpec<'_>) -> Vec<f64> {
+    let mut w = difference(y, spec.d);
+    for value in &mut w {
+        *value -= spec.mean;
+    }
+
+    w
 }
 
 /// Heap buffers for one filter run, sized to the model's state dimension `r`.
@@ -75,9 +96,9 @@ struct Workspace {
 
 impl Workspace {
     /// Allocates the buffers and computes the stationary starting covariance.
-    fn new(spec: &ArmaSpec<'_>) -> Result<Self, FilterError> {
+    fn new(spec: &ArimaSpec<'_>) -> Result<Self, FilterError> {
         spec.validate()?;
-        let r = spec.states();
+        let r = spec.arma_states();
         let mut workspace = Self {
             phi: vec![0.0; r],
             selection: vec![0.0; r],

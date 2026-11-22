@@ -12,6 +12,7 @@ import pathlib
 import numpy as np
 import statsmodels
 from statsmodels.regression.linear_model import burg, yule_walker
+from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 from statsmodels.tsa.stattools import acf, acovf, pacf
 
@@ -115,22 +116,36 @@ ARMA_LENGTH = 60
 ARMA_SPLIT = 40
 ARMA_HORIZON = 5
 
+# (name, doc, ar, d, ma, mean, sigma2, missing index). Seeds follow the list order.
 ARMA_CASES = [
-    ("AR1", "AR(1).", [0.6], [], 1.0, None),
-    ("MA1", "MA(1).", [], [0.5], 1.3, None),
-    ("ARMA21", "ARMA(2, 1).", [0.5, -0.2], [0.4], 1.3, None),
-    ("ARMA31", "ARMA(3, 1): more AR than MA lags, so the selection vector is padded.", [0.3, 0.2, -0.25], [0.5], 0.8, None),
-    ("ARMA12", "ARMA(1, 2): more MA than AR lags, so the transition column is padded.", [0.7], [0.4, -0.3], 2.0, None),
-    ("WHITE", "ARMA(0, 0): white noise with one state.", [], [], 1.5, None),
-    ("MISSING", "ARMA(1, 1) with the value at index 10 missing.", [0.5], [0.3], 1.0, 10),
+    ("AR1", "AR(1).", [0.6], 0, [], 0.0, 1.0, None),
+    ("MA1", "MA(1).", [], 0, [0.5], 0.0, 1.3, None),
+    ("ARMA21", "ARMA(2, 1).", [0.5, -0.2], 0, [0.4], 0.0, 1.3, None),
+    ("ARMA31", "ARMA(3, 1): more AR than MA lags, so the selection vector is padded.", [0.3, 0.2, -0.25], 0, [0.5], 0.0, 0.8, None),
+    ("ARMA12", "ARMA(1, 2): more MA than AR lags, so the transition column is padded.", [0.7], 0, [0.4, -0.3], 0.0, 2.0, None),
+    ("WHITE", "ARMA(0, 0): white noise with one state.", [], 0, [], 0.0, 1.5, None),
+    ("MISSING", "ARMA(1, 1) with the value at index 10 missing.", [0.5], 0, [0.3], 0.0, 1.0, 10),
+    ("MEAN", "ARMA(1, 1) with mean 3: statsmodels ARIMA `trend=\"c\"`.", [0.5], 0, [0.3], 3.0, 1.0, None),
+    ("I1", "ARIMA(1, 1, 1).", [0.5], 1, [0.3], 0.0, 1.0, None),
+    ("DRIFT", "ARIMA(1, 1, 1) with drift 0.2: statsmodels ARIMA `trend=\"t\"`.", [0.5], 1, [0.3], 0.2, 1.0, None),
+    ("I2", "ARIMA(2, 2, 0).", [0.4, -0.3], 2, [], 0.0, 0.7, None),
+    ("RANDOM_WALK", "ARIMA(0, 1, 0): a random walk.", [], 1, [], 0.0, 1.0, None),
 ]
 
 
-def arma_series(ar, ma, sigma2, seed):
-    """Simulate ARMA_LENGTH values after a burn-in, so the start is near stationarity."""
+def arima_series(ar, d, ma, mean, sigma2, seed):
+    """Simulate ARMA_LENGTH raw values whose `d`-th difference is the ARMA series plus `mean`."""
+    w = arma_series(ar, ma, sigma2, seed, ARMA_LENGTH - d) + mean
+    for _ in range(d):
+        w = np.concatenate([[10.0], 10.0 + np.cumsum(w)])
+    return w
+
+
+def arma_series(ar, ma, sigma2, seed, length=ARMA_LENGTH):
+    """Simulate `length` ARMA values after a burn-in, so the start is near stationarity."""
     rng = np.random.default_rng(seed)
     burn = 200
-    e = rng.standard_normal(ARMA_LENGTH + burn) * np.sqrt(sigma2)
+    e = rng.standard_normal(length + burn) * np.sqrt(sigma2)
     y = np.zeros_like(e)
     for t in range(len(y)):
         y[t] = e[t]
@@ -161,17 +176,33 @@ def exact_extend(head, tail, order, params):
     return exact_filter(model, params)
 
 
-def arma_case(index, name, doc, ar, ma, sigma2, missing):
-    """Render one `ArmaCase` constant from a statsmodels SARIMAX filter at fixed parameters."""
-    y = arma_series(ar, ma, sigma2, seed=100 + index)
+def forecast_model(y, ar, d, ma, mean):
+    """The statsmodels model whose forecasts are on the original scale, with its trend parameters."""
+    order = (len(ar), d, len(ma))
+    if mean == 0.0:
+        return SARIMAX(y, order=order, trend="n"), []
+    trend = {0: "c", 1: "t"}[d]
+    return ARIMA(y, order=order, trend=trend), [mean]
+
+
+def arma_case(index, name, doc, ar, d, ma, mean, sigma2, missing):
+    """Render one `ArmaCase` constant from statsmodels filters at fixed parameters.
+
+    Innovations and the likelihood come from SARIMAX on `diff(y, d) - mean` (simple
+    differencing). Forecasts come from statsmodels' own original-scale model.
+    """
+    y = arima_series(ar, d, ma, mean, sigma2, seed=100 + index)
     if missing is not None:
         y[missing] = np.nan
+    w = np.diff(y, n=d) - mean
     order = (len(ar), 0, len(ma))
     params = [*ar, *ma, sigma2]
-    full = exact_filter(SARIMAX(y, order=order, trend="n"), params)
-    head = exact_filter(SARIMAX(y[:ARMA_SPLIT], order=order, trend="n"), params)
-    extended = exact_extend(head, y[ARMA_SPLIT:], order, params)
-    forecast = full.get_forecast(ARMA_HORIZON)
+    full = exact_filter(SARIMAX(w, order=order, trend="n"), params)
+    head = exact_filter(SARIMAX(w[: ARMA_SPLIT - d], order=order, trend="n"), params)
+    extended = exact_extend(head, w[ARMA_SPLIT - d :], order, params)
+
+    model, trend_params = forecast_model(y, ar, d, ma, mean)
+    forecast = exact_filter(model, [*trend_params, *params]).get_forecast(ARMA_HORIZON)
 
     arrays = {
         "ar": ar,
@@ -186,7 +217,13 @@ def arma_case(index, name, doc, ar, ma, sigma2, missing):
     }
     lines = [f"/// {doc}", f"pub const {name}: ArmaCase = ArmaCase {{"]
     lines += [f"    {field}: {rust_array(values)}," for field, values in arrays.items()]
-    lines += [f"    sigma2: {rust_float(sigma2)},", f"    loglike: {rust_float(full.llf)},", "};"]
+    lines += [
+        f"    d: {d},",
+        f"    mean: {rust_float(mean)},",
+        f"    sigma2: {rust_float(sigma2)},",
+        f"    loglike: {rust_float(full.llf)},",
+        "};",
+    ]
     return "\n".join(lines)
 
 
@@ -197,13 +234,21 @@ def write_arma():
 //! Generated by `scripts/generate_reference.py` with statsmodels {statsmodels.__version__}.
 //! Do not edit by hand; rerun the script instead.
 
-/// Where the streaming cases split the series: `filter(values[..SPLIT])`, then `extend(values[SPLIT..])`.
+/// Where the streaming cases split the raw series: the filter sees `values[..SPLIT]`,
+/// then the innovations of `values[SPLIT..]` are compared with `extend`.
 pub const SPLIT: usize = {ARMA_SPLIT};
 
-/// One simulated series with what `SARIMAX(values, order=(p, 0, q), trend="n").filter(params)` returns.
+/// One simulated series with statsmodels' filter output at fixed parameters.
+///
+/// Innovations and the likelihood are `SARIMAX(diff(values, d) - mean, order=(p, 0, q))`.
+/// Forecasts are statsmodels' original-scale `ARIMA`/`SARIMAX(values, order=(p, d, q))`.
 pub struct ArmaCase {{
     /// The AR coefficients.
     pub ar: &'static [f64],
+    /// The differencing order.
+    pub d: usize,
+    /// The mean of the differenced series.
+    pub mean: f64,
     /// The MA coefficients.
     pub ma: &'static [f64],
     /// The innovation variance.
@@ -212,9 +257,9 @@ pub struct ArmaCase {{
     pub values: &'static [f64],
     /// `results.llf`.
     pub loglike: f64,
-    /// `filter_results.forecasts_error[0]`, one per value.
+    /// `filter_results.forecasts_error[0]`, one per differenced value.
     pub innovation_values: &'static [f64],
-    /// `filter_results.forecasts_error_cov[0, 0]`, one per value.
+    /// `filter_results.forecasts_error_cov[0, 0]`, one per differenced value.
     pub innovation_variances: &'static [f64],
     /// `forecasts_error[0]` of `filter(values[..SPLIT]).extend(values[SPLIT..])`.
     pub extend_values: &'static [f64],
