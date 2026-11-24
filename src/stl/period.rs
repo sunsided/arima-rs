@@ -28,8 +28,9 @@ pub struct PeriodCandidate {
 /// not demeaned or scaled, as coreforecast does it. The candidates are the lags where
 /// `c_k` peaks (it is larger than at its neighbours within `[2, max_period]`), in
 /// descending order of `c_k`, so the largest `c_k` comes first.
-/// Only candidates whose STL seasonal strength is above [`SEASONAL_STRENGTH_THRESHOLD`]
-/// remain, which needs two full seasons of data.
+/// Only the 8 largest peaks are checked, and of those only candidates
+/// whose STL seasonal strength is above [`SEASONAL_STRENGTH_THRESHOLD`] remain, which needs
+/// two full seasons of data.
 ///
 /// coreforecast returns only its single largest lag, and 0 if that lag fails the strength
 /// check. When it finds a period, that period is the first candidate here too. Its STL
@@ -57,7 +58,7 @@ pub struct PeriodCandidate {
 /// ```
 #[must_use]
 pub fn find_period(values: &[f64], max_period: usize) -> Vec<PeriodCandidate> {
-    if values.len() < 4 || !values.iter().all(|v| v.is_finite()) {
+    if values.len() < 4 || !crate::math::all_finite(values) {
         return Vec::new();
     }
 
@@ -73,6 +74,7 @@ pub fn find_period(values: &[f64], max_period: usize) -> Vec<PeriodCandidate> {
 
     peaks
         .into_iter()
+        .take(MAX_CHECKED_PEAKS)
         .filter_map(|period| {
             let strength = stl(values, period)?.seasonal_strength();
             (strength > SEASONAL_STRENGTH_THRESHOLD).then_some(PeriodCandidate {
@@ -83,6 +85,12 @@ pub fn find_period(values: &[f64], max_period: usize) -> Vec<PeriodCandidate> {
         })
         .collect()
 }
+
+/// How many of the largest autocovariance peaks [`find_period`] checks with a full STL.
+///
+/// shortcut: noise has hundreds of peaks and each STL costs about `n period`, which made
+/// 2000 values take 40 s; raise it if real series need weaker peaks ranked further down.
+const MAX_CHECKED_PEAKS: usize = 8;
 
 /// `sum_t x_t x_(t+k)`.
 fn lagged_products(x: &[f64], k: usize) -> f64 {

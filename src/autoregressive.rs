@@ -7,7 +7,7 @@
 
 #[cfg(doc)]
 use crate::Estimator;
-use crate::math::dot;
+use crate::math::{dot, is_constant};
 use crate::{TimeSeries, acov};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -55,6 +55,10 @@ pub(crate) struct Levinson {
 #[must_use]
 pub fn yule_walker<'a, T: Borrow<TimeSeries<'a>>>(values: T, p: usize) -> Option<ArCoefficients> {
     let values = values.borrow();
+    if is_constant(values) {
+        return None;
+    }
+
     let c: Vec<f64> = (0..=p)
         .map(|lag| acov(values, lag))
         .collect::<Option<_>>()?;
@@ -91,7 +95,7 @@ pub fn yule_walker<'a, T: Borrow<TimeSeries<'a>>>(values: T, p: usize) -> Option
 #[must_use]
 pub fn burg<'a, T: Borrow<TimeSeries<'a>>>(values: T, p: usize) -> Option<ArCoefficients> {
     let values = values.borrow();
-    if p == 0 || p >= values.len() {
+    if p == 0 || p >= values.len() || is_constant(values) {
         return None;
     }
 
@@ -247,5 +251,13 @@ mod tests {
         let fit = yule_walker(&ts, 0).unwrap();
         assert!(fit.phi.is_empty());
         assert_approx_eq!(f64, fit.sigma2, ts.var(), epsilon = 1e-12);
+    }
+
+    #[test]
+    fn constant_series_with_an_inexact_mean() {
+        let x = [0.1; 50];
+        let ts = TimeSeries::try_new(&x, Estimator::Biased).unwrap();
+        assert!(yule_walker(&ts, 2).is_none());
+        assert!(burg(&ts, 2).is_none());
     }
 }
