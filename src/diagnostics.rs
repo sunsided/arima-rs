@@ -50,7 +50,13 @@ pub fn ljung_box(residuals: &[f64], lags: usize, model_df: usize) -> Option<Test
     }
 
     let mean = mean(residuals);
-    let c0: f64 = residuals.iter().map(|x| (x - mean) * (x - mean)).sum();
+    let c0: f64 = residuals
+        .iter()
+        .map(|x| {
+            let deviation = x - mean;
+            deviation * deviation
+        })
+        .sum();
     if c0 == 0.0 {
         return None;
     }

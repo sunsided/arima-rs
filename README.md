@@ -200,6 +200,8 @@ run in the pinned image of `scripts/r/`): `arima(method = "ML")` fits and `fixed
 standard errors (1e-6, `d` up to 2 and the airline model), `acf`, `pacf`, `Box.test` (1e-9), `fourier` (exact),
 `ndiffs`, `nsdiffs` and `auto.arima`'s orders. [`docs/CONFORMANCE.md`](https://github.com/sunsided/arima-rs/blob/main/docs/CONFORMANCE.md)
 lists every suite, how to regenerate it, and the known differences between the references.
+[`docs/VERIFICATION.md`](https://github.com/sunsided/arima-rs/blob/main/docs/VERIFICATION.md) covers the property tests,
+the Kani proofs of the device path and mutation testing.
 
 In practice the fit ends up 1e-9 to 6e-8 *above* statsmodels' log-likelihood; the parameter tolerance is loose because
 two optimisers stop at slightly different points of a flat likelihood.
