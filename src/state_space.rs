@@ -109,6 +109,131 @@ pub(crate) fn transition_vector(sys: System<'_>, a: &mut [f64]) {
     }
 }
 
+/// statsmodels' default `ssm.tolerance`: the squared change of the predicted state
+/// covariance below which the filter counts as converged.
+const STEADY_STATE_TOLERANCE: f64 = 1e-19;
+
+/// statsmodels' steady-state shortcut for one filter run, as `check_convergence` in its
+/// `_kalman_filter.pyx.in` (0.14) does it.
+///
+/// After each full step with no missing value at this step or the one before, the filter
+/// compares the new predicted covariance `P_(t+1)` with the one the step started from,
+/// `P_t`. When the sum of the squared differences is below [`STEADY_STATE_TOLERANCE`], it
+/// freezes `P_t` and its innovation variance. Each further step then only moves the state:
+/// `O(r)` instead of `O(r^2)`. As in statsmodels, the first of these steps still takes its
+/// gain from `P_(t+1)`, and the later ones from the frozen `P_t`. A missing value resumes
+/// the full recursion from the frozen covariance.
+///
+/// The shortcut moves later innovations by up to about 1e-9 against the full recursion.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SteadyState {
+    /// Whether the variance and gain are frozen.
+    converged: bool,
+    /// Whether the next frozen step is the first one, whose gain comes from `P_(t+1)`.
+    first: bool,
+    /// The frozen innovation variance; meaningful only when converged.
+    variance: f64,
+    /// Whether the previous value was missing; [`None`] before the first step.
+    previous_missing: Option<bool>,
+}
+
+/// The buffers a [`SteadyState`] step works in, besides the state and its covariance.
+pub(crate) struct SteadyBuffers<'a> {
+    /// The frozen gain `P Z'`, a first row of a covariance. Length `>= r`; it must persist
+    /// between steps.
+    pub(crate) gain: &'a mut [f64],
+    /// Scratch for the covariance a step starts from, `r x r` with the covariance's stride.
+    pub(crate) previous: &'a mut [f64],
+    /// Scratch of length `>= r`.
+    pub(crate) scratch: &'a mut [f64],
+}
+
+impl SteadyState {
+    /// A run that has not converged yet.
+    pub(crate) const NEW: Self = Self {
+        converged: false,
+        first: false,
+        variance: f64::NAN,
+        previous_missing: None,
+    };
+
+    /// Conditions on `y` and moves forward one step, like [`update`] then [`predict`],
+    /// but with the frozen variance and gain once the run has converged.
+    pub(crate) fn step(
+        &mut self,
+        sys: System<'_>,
+        a: &mut [f64],
+        p: &mut [f64],
+        stride: usize,
+        y: f64,
+        buffers: SteadyBuffers<'_>,
+    ) -> Innovation {
+        let missing = y.is_nan();
+        let check = !self.converged && !missing && self.previous_missing == Some(false);
+        self.previous_missing = Some(missing);
+        if missing {
+            self.converged = false;
+        }
+
+        if self.converged {
+            let innovation = frozen_step(sys, a, self.variance, buffers.gain, y);
+            if self.first {
+                self.first = false;
+                buffers.gain[..sys.dim()].copy_from_slice(&p[..sys.dim()]);
+            }
+
+            return innovation;
+        }
+
+        let r = sys.dim();
+        if check {
+            copy_block(p, buffers.previous, r, stride);
+            self.variance = p[0];
+        }
+
+        let innovation = update(r, a, p, stride, y, buffers.scratch);
+        predict(sys, a, p, stride, buffers.scratch);
+        if check && squared_change(p, buffers.previous, r, stride) < STEADY_STATE_TOLERANCE {
+            self.converged = true;
+            self.first = true;
+            buffers.gain[..r].copy_from_slice(&p[..r]);
+            copy_block(buffers.previous, p, r, stride);
+        }
+
+        innovation
+    }
+}
+
+/// One step with a frozen innovation variance and gain.
+fn frozen_step(sys: System<'_>, a: &mut [f64], variance: f64, gain: &[f64], y: f64) -> Innovation {
+    let value = y - a[0];
+    for (state, k) in a.iter_mut().zip(&gain[..sys.dim()]) {
+        *state += k * value / variance;
+    }
+
+    transition_vector(sys, a);
+    Innovation { value, variance }
+}
+
+/// Copies the top-left `r x r` block of `from` into `to`, both with row stride `stride`.
+fn copy_block(from: &[f64], to: &mut [f64], r: usize, stride: usize) {
+    for i in 0..r {
+        let row = i * stride..i * stride + r;
+        to[row.clone()].copy_from_slice(&from[row]);
+    }
+}
+
+/// The sum of the squared differences of the top-left `r x r` blocks of `p` and `q`.
+fn squared_change(p: &[f64], q: &[f64], r: usize, stride: usize) -> f64 {
+    (0..r)
+        .flat_map(|i| (0..r).map(move |j| i * stride + j))
+        .map(|index| {
+            let difference = p[index] - q[index];
+            difference * difference
+        })
+        .sum()
+}
+
 /// Conditions the state on the observation `y` and returns its innovation.
 ///
 /// `gain` is scratch of length `>= r`. A `NaN` observation counts as missing: the

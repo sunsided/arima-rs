@@ -14,7 +14,7 @@ The crate is published as `backshift`, because `arima` is taken on crates.io. Ph
 3. AR fitting: Yule–Walker and Burg.
 4. The Kalman core and `Filter<R>`, in two parts. The likelihood and the filter share one allocation-free recursion over slices with a stride, written for this crate rather than on `minikalman`, whose dimensions are compile-time only.
    - 4a: ARMA only (`d = 0`, no mean). Log-likelihood, innovations and forecasts at fixed parameters, streaming checked against statsmodels `extend`, and a counting-allocator test.
-     - statsmodels freezes the state covariance once it changes by less than `ssm.tolerance` (1e-19) and reuses it, which moves later innovations by up to about 1e-9. The crate always runs the full recursion, so references are generated with `tolerance = 0`. An opt-in steady-state mode for devices could match the default later.
+     - statsmodels freezes the state covariance once it changes by less than `ssm.tolerance` (1e-19) and reuses it, which moves later innovations by up to about 1e-9. The crate always runs the full recursion, so references are generated with `tolerance = 0`. `Filter::with_steady_state` is that opt-in mode for devices; it matches the default to 1e-13 (#41).
    - 4b: differencing and a mean or drift inside the filter. statsmodels `trend='c'` in SARIMAX is an intercept, not a mean, and `d >= 1` has no stationary start, so these need their own conventions.
 5. Fitting: Hannan–Rissanen, BFGS and `fit`.
 6. Forecast intervals and fit statistics: AIC, AICc and BIC.

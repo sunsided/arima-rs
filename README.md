@@ -61,6 +61,8 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
   treats `NaN` as missing, and forecasts original-scale means, variances and intervals. `R` is the state capacity,
   `ArimaSpec::states()`, i.e. `max(p + P s, q + Q s + 1) + d + D s`; the airline model ARIMA(0, 1, 1)(0, 1, 1, 12)
   needs `R = 27`. `M` (default 0) holds the regression coefficients and does not grow the covariance.
+  `with_steady_state()` opts into statsmodels' default steady-state shortcut: once the covariance converges, each
+  update costs `O(R)` instead of `O(R²)`, and the results match statsmodels with its default tolerance.
 - Regression with ARIMA errors: `fit_exog`, `update_exog`, `forecast_exog_into` and friends model `y_t - x_t . beta`
   with the regressors differenced along with `y`, as R's `arima(xreg=)` does. [`examples/holidays_outages.rs`](https://github.com/sunsided/arima-rs/blob/main/examples/holidays_outages.rs)
   fits daily users with bank-holiday and outage dummies, and forecasts through a known upcoming holiday.
@@ -96,11 +98,11 @@ the refit is about 21 KB. The filter's state lives inline:
 
 | Capacity (`M = 0` unless given) | `size_of::<Filter<R, M>>()` | Fits, for example |
 |---|---|---|
-| `R = 4` | 336 bytes | ARIMA(1,1,1), ARIMA(2,1,2) |
-| `R = 8` | 880 bytes | ARIMA(2,0,1)(1,0,0,4) |
-| `R = 16` | 2,736 bytes | ARIMA(1,0,0)(1,0,0,12) |
-| `R = 27` | 6,960 bytes | the airline model ARIMA(0,1,1)(0,1,1,12) |
-| `R = 3, M = 50` | 640 bytes | an ARMA(2,2) error with 50 regressors, such as Fourier terms |
+| `R = 4` | 384 bytes | ARIMA(1,1,1), ARIMA(2,1,2) |
+| `R = 8` | 960 bytes | ARIMA(2,0,1)(1,0,0,4) |
+| `R = 16` | 2,880 bytes | ARIMA(1,0,0)(1,0,0,12) |
+| `R = 27` | 7,192 bytes | the airline model ARIMA(0,1,1)(0,1,1,12) |
+| `R = 3, M = 50` | 680 bytes | an ARMA(2,2) error with 50 regressors, such as Fourier terms |
 
 `Filter::new` needs about three times that on the stack while it solves for the starting covariance, and the
 forecasts about twice.

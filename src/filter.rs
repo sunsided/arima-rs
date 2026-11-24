@@ -16,7 +16,7 @@
 //!   `ARIMA(y, order=(p, d, q), trend=...).filter(params).get_forecast(h)`.
 
 use crate::normal::normal_quantile;
-use crate::state_space::{self, Innovation, LyapunovScratch, System};
+use crate::state_space::{self, Innovation, LyapunovScratch, SteadyBuffers, SteadyState, System};
 use crate::{math, polynomial};
 use core::error::Error;
 use core::fmt::{Display, Formatter};
@@ -231,7 +231,7 @@ impl Error for FilterError {}
 ///
 /// `R` must be at least [`ArimaSpec::states`] and `M` at least the number of regression
 /// coefficients; `M` defaults to 0, a model without regressors. The regressors do not
-/// enlarge the covariance, so the size is about `8 (R² + 5R + M)` bytes.
+/// enlarge the covariance, so the size is about `8 (R² + 6R + M)` bytes.
 /// [`Filter::new`] uses about three times that on the stack while it computes the
 /// starting covariance, and [`Filter::forecast_into`] about twice. The filter is
 /// `Copy`, so it can be snapshotted cheaply.
@@ -281,6 +281,9 @@ pub struct Filter<const R: usize, const M: usize = 0> {
     beta: [f64; M],
     /// The number of regressors.
     m: usize,
+    /// The steady-state shortcut and its frozen gain, if [`Filter::with_steady_state`]
+    /// enabled it.
+    steady: Option<(SteadyState, [f64; R])>,
 }
 
 impl<const R: usize, const M: usize> Filter<R, M> {
@@ -325,6 +328,7 @@ impl<const R: usize, const M: usize> Filter<R, M> {
             seen: 0,
             beta: [0.0; M],
             m: spec.exog.len(),
+            steady: None,
         };
         filter.beta[..filter.m].copy_from_slice(spec.exog);
         spec.expand_arma_into(&mut filter.phi, &mut filter.selection);
@@ -347,6 +351,38 @@ impl<const R: usize, const M: usize> Filter<R, M> {
         }
 
         Ok(filter)
+    }
+
+    /// Turns on statsmodels' steady-state shortcut, its default `ssm.tolerance = 1e-19`.
+    ///
+    /// Once the predicted covariance changes by less than `1e-19` (the sum of its squared
+    /// changes) in one step, the innovation variance and gain are frozen and reused. Each
+    /// update then costs `O(R)` instead of `O(R²)`, which saves time on a device that runs a
+    /// filter for a long time. The innovations and forecasts then match statsmodels with its
+    /// default tolerance, such as `results.extend()` or `filter()` on the whole series, and
+    /// move by up to about 1e-9 against the full recursion (the default here). A missing
+    /// value resumes the full recursion until the covariance converges again.
+    ///
+    /// Each update before convergence takes `8 R²` more bytes of stack for the comparison.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use backshift::{ArimaSpec, Filter};
+    ///
+    /// let spec = ArimaSpec { ar: &[0.5], ma: &[0.3], ..ArimaSpec::default() };
+    /// let mut exact = Filter::<2>::new(&spec).unwrap();
+    /// let mut steady = Filter::<2>::new(&spec).unwrap().with_steady_state();
+    /// for t in 0..200 {
+    ///     let y = (t as f64 * 0.7).sin();
+    ///     let (a, b) = (exact.update(y).unwrap(), steady.update(y).unwrap());
+    ///     assert!((a.value - b.value).abs() < 1e-8);
+    /// }
+    /// ```
+    #[must_use]
+    pub fn with_steady_state(mut self) -> Self {
+        self.steady = Some((SteadyState::NEW, [0.0; R]));
+        self
     }
 
     /// Feeds one raw observation and returns the one-step prediction error of its
@@ -375,11 +411,24 @@ impl<const R: usize, const M: usize> Filter<R, M> {
         let w = self.difference(u)? - self.mean;
 
         let r = self.r;
+        let mut steady = self.steady;
         let mut scratch = [0.0; R];
         let (system, a, p) = self.parts();
-        let innovation = state_space::update(r, a, p, R, w, &mut scratch);
-        state_space::predict(system, a, p, R, &mut scratch);
+        let innovation = if let Some((steady, gain)) = &mut steady {
+            let mut previous = [[0.0; R]; R];
+            let buffers = SteadyBuffers {
+                gain,
+                previous: previous.as_flattened_mut(),
+                scratch: &mut scratch,
+            };
+            steady.step(system, a, p, R, w, buffers)
+        } else {
+            let innovation = state_space::update(r, a, p, R, w, &mut scratch);
+            state_space::predict(system, a, p, R, &mut scratch);
+            innovation
+        };
 
+        self.steady = steady;
         Some(innovation)
     }
 
