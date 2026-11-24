@@ -248,6 +248,14 @@ On the non-seasonal series all crates pick the same model. On the seasonal serie
 airline model, because its STL seasonal-strength test finds the seasonal unit root; the other two crates miss it and
 difference twice at lag 1 instead.
 
+The seasonal search times differ by more than fit speed. Choosing `d = 2, D = 0` leaves the yearly pattern to seasonal
+AR and MA terms at lag 12, so every candidate has a large state and fits slowly: even backshift's exact fit of
+anofox-forecast's choice (0,2,2)(1,0,1,12) takes 8.4 ms, against 1.1 ms for the airline model. anofox-forecast also
+visits 35 models to backshift's 14, and at this size (`n <= 150, m <= 12`) it follows R's rule and fits each candidate
+by exact likelihood through its port of R's `arima`, at about 105 ms per model, while its standalone `SARIMA` fit of
+the same order takes 0.5 ms. Its own `with_approximation(true)` takes 486 ms. backshift spends 6.3 ms per candidate,
+or 0.4 ms approximately. Fitting one given order by CSS, the two crates are level (0.49 and 0.45 ms on (0,2,2)(1,0,1,12)).
+
 backshift and foresight reach the same maximum in the fits above, and anofox-forecast stops short of it on all three:
 it optimises the conditional sum of squares, which needs no Kalman filter. backshift's exact fits use that only as a
 warm start (R's `CSS-ML`); its approximate fits stop there, like R's `method = "CSS"`, and are the fastest on every
