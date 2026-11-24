@@ -94,7 +94,7 @@ intervals and refits the model, and a counting allocator asserts that `Filter::n
 forecasts, the diagnostic tests and a refit allocate nothing. That binary comes out at about 52 KB of `.text`, of which
 the refit is about 21 KB. The filter's state lives inline:
 
-| Capacity | `size_of::<Filter<R, M>>()` | Fits, for example |
+| Capacity (`M = 0` unless given) | `size_of::<Filter<R, M>>()` | Fits, for example |
 |---|---|---|
 | `R = 4` | 336 bytes | ARIMA(1,1,1), ARIMA(2,1,2) |
 | `R = 8` | 880 bytes | ARIMA(2,0,1)(1,0,0,4) |

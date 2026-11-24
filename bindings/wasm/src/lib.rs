@@ -42,7 +42,8 @@ const MAX_PERIOD: usize = 366;
 /// the square of the state count. The airline model at period 52 needs 107.
 const MAX_STATES: usize = 128;
 
-/// The most regressor columns a model may have: the filter's regressor capacity.
+/// The most regressor columns a model may have. It is also the regressor capacity `M` of
+/// [`DeviceFilter`], so every model that fits can stream.
 const MAX_COLUMNS: usize = 64;
 
 /// The streaming filter the bindings use.
