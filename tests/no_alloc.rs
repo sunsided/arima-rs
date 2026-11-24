@@ -109,6 +109,16 @@ fn main() {
     online.forecast_into(&mut online_forecast);
     std::hint::black_box(&online_forecast);
 
+    let cycles = [1.0, -1.0, 0.5, -0.5, 2.0, 0.0, -2.0];
+    let mut seasonal = backshift::MstlFilter::<4, 7>::new(&spec, &[3, 4], &cycles)
+        .expect("valid periods and cycles");
+    for t in 0..20 {
+        std::hint::black_box(seasonal.update(f64::from(t % 6)));
+    }
+    let (mut s_mean, mut s_lower, mut s_upper) = ([0.0; 5], [0.0; 5], [0.0; 5]);
+    seasonal.forecast_interval_into(0.9, &mut s_mean, &mut s_lower, &mut s_upper);
+    std::hint::black_box((&s_mean, &s_lower, &s_upper));
+
     let mut fourier = [0.0; 4];
     backshift::fourier_row(365.25, 2, 1_000_000, &mut fourier).expect("valid terms");
     std::hint::black_box(&fourier);

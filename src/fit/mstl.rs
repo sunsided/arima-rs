@@ -17,6 +17,7 @@
 
 use super::{AutoArima, AutoFit, FitError};
 use crate::filter::{Filter, FilterError};
+use crate::seasonal_filter::{MstlFilter, MstlFilterError};
 use crate::stl::{MSTL_ITERATIONS, MultiDecomposition, mstl};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -117,6 +118,36 @@ impl MstlArima {
         }
 
         Ok(MstlForecast { mean, lower, upper })
+    }
+
+    /// A heap-free streaming forecaster for this model, at the end of the series: a
+    /// `Filter<R>` warmed up on the adjusted series, and each seasonal component's last
+    /// cycle, `L` values in total (the sum of the periods).
+    ///
+    /// Its forecasts equal [`MstlArima::forecast`]; each further value goes through
+    /// [`MstlFilter::update`].
+    ///
+    /// # Errors
+    ///
+    /// As for [`MstlFilter::new`]: `R` too small for the model, `L` below the sum of the
+    /// periods, or more than [`MAX_SEASONAL_PERIODS`](crate::MAX_SEASONAL_PERIODS) periods.
+    pub fn stream<const R: usize, const L: usize>(
+        &self,
+    ) -> Result<MstlFilter<R, L>, MstlFilterError> {
+        let parts = &self.decomposition;
+        let n = parts.trend.len();
+        let cycles: Vec<f64> = parts
+            .periods
+            .iter()
+            .zip(&parts.seasonal)
+            .flat_map(|(&period, component)| component[n - period..].iter().copied())
+            .collect();
+        let mut stream = MstlFilter::new(&self.fit.fitted.spec(), &parts.periods, &cycles)?;
+        for &value in &self.adjusted {
+            stream.warm_up_adjusted(value);
+        }
+
+        Ok(stream)
     }
 
     /// The sum of the seasonal components' last cycles, repeated over `horizon` steps.

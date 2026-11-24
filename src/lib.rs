@@ -77,6 +77,7 @@ pub use crate::fourier::{FourierError, fourier_columns, fourier_row};
 pub use crate::likelihood::{innovations, innovations_exog, loglike, loglike_exog};
 pub use crate::normal::normal_quantile;
 pub use crate::online::{OnlineAr, OnlineArError, OnlineArOptions};
+pub use crate::seasonal_filter::{MAX_SEASONAL_PERIODS, MstlFilter, MstlFilterError};
 pub use crate::state_space::Innovation;
 #[cfg(feature = "alloc")]
 pub use crate::stl::{
@@ -103,6 +104,7 @@ mod math;
 mod normal;
 mod online;
 mod polynomial;
+mod seasonal_filter;
 mod special;
 mod state_space;
 #[cfg(feature = "alloc")]
