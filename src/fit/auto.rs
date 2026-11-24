@@ -303,11 +303,7 @@ impl AutoArima {
     /// assert!((1..=4).contains(&k));
     /// ```
     pub fn fit_fourier(&self, y: &[f64], periods: &[(f64, usize)]) -> Result<FourierFit, FitError> {
-        let auto = Self {
-            period: 0,
-            seasonal_d: Some(0),
-            ..*self
-        };
+        let auto = self.non_seasonal();
         let mut terms = Vec::with_capacity(periods.len());
         for &(period, max_k) in periods {
             if !period.is_finite() || period < 2.0 || max_k == 0 {
@@ -344,6 +340,16 @@ impl AutoArima {
             terms,
             candidates,
         })
+    }
+
+    /// This search without a seasonal part and with `D = 0`, for series whose seasonality
+    /// is modelled elsewhere (Fourier regressors, MSTL).
+    pub(super) fn non_seasonal(&self) -> Self {
+        Self {
+            period: 0,
+            seasonal_d: Some(0),
+            ..*self
+        }
     }
 
     /// Fits this search to `y` with the Fourier regressors of `terms`.
