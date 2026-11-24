@@ -269,6 +269,22 @@ refits its choice exactly, so the model it returns is an exact fit. Neither of t
 model (anofox-forecast updates its exponential-smoothing models incrementally): backshift's `Filter::<27>::update` takes
 about 0.33 µs per value for the airline model.
 
+ETS, scored on the last values of each series, which no crate sees (root mean squared error, lower is better):
+
+| ETS fit | backshift | foresight | anofox-forecast |
+|---|---|---|---|
+| damped trend (A,Ad,N), n=120 | 2.5 ms, 1.950 | 2.4 ms, 1.950 | 0.07 ms, 1.660 |
+| trend + monthly season (A,A,A), n=144 | 4.4 ms, 1.195 | 53.1 ms, 1.195 | 10.6 ms, 1.195 |
+
+| Automatic ETS | backshift | foresight | anofox-forecast |
+|---|---|---|---|
+| damped trend, n=120 | 3.8 ms, (A,Ad,N) | 10.8 ms, (A,Ad,N) | 2.2 ms, (A,Ad,N) |
+| trend + monthly season, n=144 | 30.5 ms, (A,A,A) | 537.3 ms, (A,A,A) | 228.6 ms, (A,A,A) |
+
+All three choose the same models. On the seasonal series backshift fits and searches fastest at the same forecast
+error. On the damped series anofox-forecast is fastest and forecasts best: its estimates differ from backshift's and
+foresight's, which agree with each other (and backshift's reach R's likelihood or higher).
+
 Reproduce with `cargo run --release --manifest-path ci/compare/Cargo.toml` (add `--features rayon` for the parallel
 seasonal search); `cargo bench` runs the in-crate Criterion benchmarks.
 
