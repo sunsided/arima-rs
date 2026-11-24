@@ -124,7 +124,8 @@ impl Default for EtsSpec<'_> {
 }
 
 impl EtsSpec<'_> {
-    /// Checks that every parameter and state is finite and `sigma2` is positive.
+    /// Checks that every parameter and state is finite, and `alpha` and `sigma2` are
+    /// positive.
     fn validate(&self) -> Result<(), FilterError> {
         let values = [
             self.alpha,
@@ -136,7 +137,8 @@ impl EtsSpec<'_> {
             self.sigma2,
         ];
         let finite = values.iter().chain(self.seasonal).all(|v| v.is_finite());
-        if !finite || self.sigma2 <= 0.0 {
+        // The slope update divides by `alpha`.
+        if !finite || self.sigma2 <= 0.0 || self.alpha <= 0.0 {
             return Err(FilterError::InvalidParameter);
         }
 
@@ -157,7 +159,7 @@ impl EtsSpec<'_> {
 
 /// A streaming ETS filter with room for `M` seasonal states, stored inline with no heap.
 ///
-/// `M` must be at least the period of the model (1 for a model without a season). The size
+/// `M` must be at least the period of the model; a model without a season fits in `M = 0`. The size
 /// is about `8 (M + 9)` bytes, and each update costs `O(1)`: the seasonal states form a
 /// ring, so no update shifts them.
 ///
@@ -196,8 +198,8 @@ impl<const M: usize> EtsFilter<M> {
     ///
     /// # Errors
     ///
-    /// - [`FilterError::InvalidParameter`] if a parameter or state is not finite or
-    ///   `sigma2` is not positive.
+    /// - [`FilterError::InvalidParameter`] if a parameter or state is not finite, or `alpha`
+    ///   or `sigma2` is not positive.
     /// - [`FilterError::Capacity`] if the model has more seasonal states than `M`.
     pub fn new(spec: &EtsSpec<'_>) -> Result<Self, FilterError> {
         spec.validate()?;
@@ -284,6 +286,7 @@ impl<const M: usize> EtsFilter<M> {
 
     /// Forecasts the next `mean.len()` values with central prediction intervals at `level`:
     /// `mean ± z sqrt(variance)` with `z = Φ⁻¹((1 + level) / 2)`, as R's `forecast.ets`.
+    /// `level` is a probability in `(0, 1)`; outside it the bounds are not finite.
     ///
     /// # Panics
     ///
@@ -319,6 +322,27 @@ impl<const M: usize> EtsFilter<M> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_model_without_a_season_needs_no_seasonal_capacity() {
+        let spec = EtsSpec {
+            alpha: 0.3,
+            trend: Trend::Additive { beta: 0.1 },
+            gamma: 0.0,
+            level: 10.0,
+            slope: 1.0,
+            seasonal: &[],
+            sigma2: 1.0,
+        };
+        let mut filter = EtsFilter::<0>::new(&spec).unwrap();
+        filter.update(11.5);
+        let (mut mean, mut variance) = ([0.0; 2], [0.0; 2]);
+        filter.forecast_into(&mut mean, &mut variance);
+        assert!(mean.iter().chain(&variance).all(|v| v.is_finite()));
+
+        let zero = EtsSpec { alpha: 0.0, ..spec };
+        assert!(EtsFilter::<0>::new(&zero).is_err());
+    }
 
     #[test]
     fn missing_values_move_the_states_on_as_forecast() {

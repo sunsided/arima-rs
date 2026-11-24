@@ -782,6 +782,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn concentrated_states_minimise_the_squared_errors() {
+        // Checks the state columns directly: at fixed smoothing, moving any free state off
+        // the least-squares solution must not lower the sum of squared errors.
+        let layout = Layout::of(&Ets::new().damped().seasonal(4));
+        let smoothing = layout.smoothing(&[-1.0, -2.0, -1.5, 0.5]);
+        let y: Vec<f64> = (0..40)
+            .map(|t| {
+                let t = f64::from(t);
+                20.0 + 0.3 * t + [2.0, -1.0, 0.5, -1.5][(t as usize) % 4] + (t * 1.7).sin()
+            })
+            .collect();
+        let best = layout.best_states(&smoothing, &y).unwrap();
+        let sse = |free: &[f64]| {
+            let (mut ring, mut errors) = (vec![0.0; 4], vec![0.0; y.len()]);
+            layout.errors(&smoothing, free, &y, &mut ring, &mut errors);
+            errors.iter().map(|e| e * e).sum::<f64>()
+        };
+        let minimum = sse(&best);
+        for j in 0..best.len() {
+            for step in [-1e-3, 1e-3] {
+                let mut moved = best.clone();
+                moved[j] += step;
+                assert!(sse(&moved) > minimum, "state {j}, step {step}");
+            }
+        }
+    }
+
+    #[test]
     fn transforms_respect_rs_bounds() {
         let layout = Layout::of(&Ets::new().damped().seasonal(4));
         for u in [-40.0, 0.0, 40.0] {

@@ -800,7 +800,7 @@ impl Display for FitError {
                     "model needs {needed} values after differencing, got {present}"
                 )
             }
-            FitError::Degenerate => write!(f, "the series leaves no innovation variance"),
+            FitError::Degenerate => write!(f, "the likelihood has no finite maximum"),
             FitError::BufferTooSmall { needed, got } => {
                 write!(f, "buffer holds {got} values, needs {needed}")
             }
