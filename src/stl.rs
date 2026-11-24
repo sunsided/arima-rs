@@ -62,7 +62,9 @@ impl Decomposition {
 /// derived from `period`, degree-1 LOESS throughout, and five non-robust inner passes.
 ///
 /// Matches statsmodels `STL(values, period=period).fit()`. Returns [`None`] unless
-/// `period >= 2` and `values` holds at least two full seasons of finite values.
+/// `period >= 2` and `values` holds at least two full seasons of finite values. A constant series decomposes exactly
+/// into its level as the trend, with zero seasonal and remainder parts; statsmodels leaves
+/// rounding noise there, which would read as seasonality.
 ///
 /// # Examples
 ///
@@ -85,7 +87,9 @@ pub fn stl(values: &[f64], period: usize) -> Option<Decomposition> {
 /// `STL(values, period=period, seasonal=seasonal_window).fit()`. A longer window gives a
 /// seasonal pattern that changes more slowly. Returns [`None`] unless `seasonal_window` is
 /// odd and at least 3, `period >= 2`, and `values` holds at least two full seasons of
-/// finite values.
+/// finite values. A constant series decomposes exactly
+/// into its level as the trend, with zero seasonal and remainder parts; statsmodels leaves
+/// rounding noise there, which would read as seasonality.
 ///
 /// # Examples
 ///
