@@ -65,7 +65,8 @@ pub use crate::difference::{difference, integrate};
 pub use crate::filter::{ArimaSpec, Filter, FilterError, Seasonal};
 #[cfg(feature = "alloc")]
 pub use crate::fit::{
-    Arima, ArmaCoefficients, AutoArima, AutoFit, Criterion, Fitted, hannan_rissanen, nsdiffs,
+    Arima, ArmaCoefficients, AutoArima, AutoFit, Criterion, Fitted, FourierFit, hannan_rissanen,
+    nsdiffs,
 };
 pub use crate::fit::{FitError, Refit, RefitOptions, Refitter};
 #[cfg(feature = "alloc")]

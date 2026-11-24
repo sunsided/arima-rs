@@ -70,6 +70,7 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
   at once) give sine/cosine pairs in the column order of R's `forecast::fourier()`. With `fit_exog` and
   `update_exog` they model long or non-integer seasons (365.25, 8766) as dynamic harmonic regression, which a
   seasonal ARIMA cannot hold in memory.
+  `AutoArima::fit_fourier` picks the number of harmonics per period by AICc, as FPP3 recommends.
 - `loglike` and `innovations` (and their `_exog` forms) for any model size, through the same recursion as the filter.
 - `AutoArima`: the stepwise search (or an exhaustive one, parallel with the `rayon` feature) with `ndiffs` and
   `nsdiffs` choosing `d` and `D`; AICc by default, AIC or BIC on request.
