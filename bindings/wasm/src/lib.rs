@@ -42,12 +42,12 @@ const MAX_PERIOD: usize = 366;
 /// the square of the state count. The airline model at period 52 needs 107.
 const MAX_STATES: usize = 128;
 
-/// The most regressor columns a model may have: the filter holds one coefficient per
-/// column within its capacity.
-const MAX_COLUMNS: usize = CAPACITY;
+/// The most regressor columns a model may have. It is also the regressor capacity `M` of
+/// [`DeviceFilter`], so every model that fits can stream.
+const MAX_COLUMNS: usize = 64;
 
 /// The streaming filter the bindings use.
-type DeviceFilter = Filter<CAPACITY>;
+type DeviceFilter = Filter<CAPACITY, MAX_COLUMNS>;
 
 /// A fitted seasonal ARIMA(p, d, q)(P, D, Q, s) model.
 #[wasm_bindgen]
@@ -378,12 +378,12 @@ impl Model {
         self.fitted.nobs
     }
 
-    /// The streaming filter's state count for this model, `ArimaSpec::capacity()`; at most
+    /// The streaming filter's state count for this model, `ArimaSpec::states()`; at most
     /// 64 can stream or forecast.
     #[wasm_bindgen(getter)]
     #[must_use]
     pub fn states(&self) -> usize {
-        self.fitted.spec().capacity()
+        self.fitted.spec().states()
     }
 
     /// Forecasts the `horizon` values after `history` with central prediction intervals
@@ -675,8 +675,7 @@ fn check_orders(p: usize, d: usize, q: usize) -> Result<(), JsError> {
     Ok(())
 }
 
-/// The state count of an ARIMA(p, d, q)(P, D, Q, s) model, `ArimaSpec::capacity()`
-/// without regressors.
+/// The state count of an ARIMA(p, d, q)(P, D, Q, s) model, `ArimaSpec::states()`.
 const fn states(
     p: usize,
     d: usize,

@@ -119,17 +119,11 @@ impl Default for ArimaSpec<'_> {
 impl ArimaSpec<'_> {
     /// The number of states the model needs: `max(p + P s, q + Q s + 1) + d + D s`.
     ///
-    /// Size a [`Filter`] with [`ArimaSpec::capacity`], which also counts the regressors.
+    /// This is the smallest state capacity `R` of a [`Filter`] for this model. The
+    /// regressor capacity `M` must hold `exog.len()`.
     #[must_use]
     pub fn states(&self) -> usize {
         self.arma_states() + self.differencing_order()
-    }
-
-    /// The smallest capacity `R` a [`Filter`] needs for this model:
-    /// `max(states(), exog.len())`.
-    #[must_use]
-    pub fn capacity(&self) -> usize {
-        self.states().max(self.exog.len())
     }
 
     /// The state dimension of the expanded ARMA part, `max(p + P s, q + Q s + 1)`.
@@ -201,11 +195,11 @@ pub enum FilterError {
     /// The AR part is not stationary, so the model has no unconditional covariance
     /// to start from.
     NonStationary,
-    /// The model has more regression coefficients than the filter's capacity `R`.
+    /// The model has more regression coefficients than the filter's regressor capacity `M`.
     Regressors {
         /// The number of regression coefficients, `exog.len()`.
         needed: usize,
-        /// The filter's capacity `R`.
+        /// The filter's regressor capacity `M`.
         capacity: usize,
     },
 }
@@ -232,9 +226,12 @@ impl Display for FilterError {
 
 impl Error for FilterError {}
 
-/// A streaming ARIMA filter with room for `R` states, stored inline with no heap.
+/// A streaming ARIMA filter with room for `R` states and `M` regressors, stored inline
+/// with no heap.
 ///
-/// `R` must be at least [`ArimaSpec::capacity`]. Its size is about `8 (R² + 6R)` bytes.
+/// `R` must be at least [`ArimaSpec::states`] and `M` at least the number of regression
+/// coefficients; `M` defaults to 0, a model without regressors. The regressors do not
+/// enlarge the covariance, so the size is about `8 (R² + 5R + M)` bytes.
 /// [`Filter::new`] uses about three times that on the stack while it computes the
 /// starting covariance, and [`Filter::forecast_into`] about twice. The filter is
 /// `Copy`, so it can be snapshotted cheaply.
@@ -257,7 +254,7 @@ impl Error for FilterError {}
 /// assert!(variance[0] < variance[2]);
 /// ```
 #[derive(Debug, Clone, Copy)]
-pub struct Filter<const R: usize> {
+pub struct Filter<const R: usize, const M: usize = 0> {
     /// The ARMA state dimension, `1 <= r` and `r + k <= R`.
     r: usize,
     /// The degree `k` of the differencing polynomial.
@@ -281,12 +278,12 @@ pub struct Filter<const R: usize> {
     /// How many raw values were fed, capped at `k + 1`. Values beyond `k` produce innovations.
     seen: usize,
     /// The regression coefficients; the first `m` entries are used.
-    beta: [f64; R],
+    beta: [f64; M],
     /// The number of regressors.
     m: usize,
 }
 
-impl<const R: usize> Filter<R> {
+impl<const R: usize, const M: usize> Filter<R, M> {
     /// Builds a filter at the model's stationary start, before any observation.
     ///
     /// This is the device path: it needs only the coefficients and does not allocate.
@@ -296,7 +293,7 @@ impl<const R: usize> Filter<R> {
     /// - [`FilterError::InvalidParameter`] if a coefficient or the mean is not finite,
     ///   `sigma2 <= 0`, or a non-empty seasonal part has period 0.
     /// - [`FilterError::Capacity`] if the model needs more than `R` states.
-    /// - [`FilterError::Regressors`] if the model has more than `R` regression coefficients.
+    /// - [`FilterError::Regressors`] if the model has more than `M` regression coefficients.
     /// - [`FilterError::NonStationary`] if the AR part is not stationary.
     pub fn new(spec: &ArimaSpec<'_>) -> Result<Self, FilterError> {
         spec.validate()?;
@@ -307,10 +304,10 @@ impl<const R: usize> Filter<R> {
             });
         }
 
-        if spec.exog.len() > R {
+        if spec.exog.len() > M {
             return Err(FilterError::Regressors {
                 needed: spec.exog.len(),
-                capacity: R,
+                capacity: M,
             });
         }
 
@@ -326,7 +323,7 @@ impl<const R: usize> Filter<R> {
             lags: [0.0; R],
             mean: spec.mean,
             seen: 0,
-            beta: [0.0; R],
+            beta: [0.0; M],
             m: spec.exog.len(),
         };
         filter.beta[..filter.m].copy_from_slice(spec.exog);
@@ -568,18 +565,18 @@ impl<const R: usize> Filter<R> {
 /// The past is known, so the lags start with zero variance; their covariance with the
 /// ARMA state then accumulates exactly, which gives the variance of the integrated
 /// forecast for any differencing polynomial.
-struct Forecast<'f, const R: usize> {
+struct Forecast<'f, const R: usize, const M: usize> {
     /// The filter being forecast from.
-    filter: &'f Filter<R>,
+    filter: &'f Filter<R, M>,
     /// The forecast mean of `x`.
     x: [f64; R],
     /// The forecast covariance of `x`; the top-left `(r + k) x (r + k)` block is used.
     cov: [[f64; R]; R],
 }
 
-impl<'f, const R: usize> Forecast<'f, R> {
+impl<'f, const R: usize, const M: usize> Forecast<'f, R, M> {
     /// The joint state right after the last observation.
-    fn start(filter: &'f Filter<R>) -> Self {
+    fn start(filter: &'f Filter<R, M>) -> Self {
         let (r, k) = (filter.r, filter.k);
         let mut x = [0.0; R];
         x[..r].copy_from_slice(&filter.a[..r]);
@@ -862,7 +859,6 @@ mod tests {
             ..ArimaSpec::default()
         };
         assert_eq!(spec.states(), 3);
-        assert_eq!(spec.capacity(), 3);
         assert_eq!(
             Filter::<2>::new(&spec).err(),
             Some(FilterError::Capacity {
@@ -883,7 +879,7 @@ mod tests {
             ..ArimaSpec::default()
         };
         let plain_spec = ArimaSpec { exog: &[], ..spec };
-        let mut with_exog = Filter::<4>::new(&spec).unwrap();
+        let mut with_exog = Filter::<4, 2>::new(&spec).unwrap();
         let mut plain = Filter::<4>::new(&plain_spec).unwrap();
 
         let rows = [[1.0, 0.5], [0.2, 0.1], [-0.3, 0.9]];
@@ -913,7 +909,7 @@ mod tests {
             exog: &[1.0],
             ..ArimaSpec::default()
         };
-        Filter::<2>::new(&spec).unwrap().update(1.0);
+        Filter::<2, 1>::new(&spec).unwrap().update(1.0);
     }
 
     #[test]
@@ -922,9 +918,10 @@ mod tests {
             exog: &[1.0, 2.0, 3.0],
             ..ArimaSpec::default()
         };
-        assert_eq!((spec.states(), spec.capacity()), (1, 3));
+        assert_eq!(spec.states(), 1);
+        assert!(Filter::<1, 3>::new(&spec).is_ok());
         assert_eq!(
-            Filter::<2>::new(&spec).err(),
+            Filter::<1, 2>::new(&spec).err(),
             Some(FilterError::Regressors {
                 needed: 3,
                 capacity: 2

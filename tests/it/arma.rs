@@ -10,6 +10,9 @@ const TOLERANCE: f64 = 1e-9;
 /// so the stride differs from the runtime path's.
 const CAPACITY: usize = 32;
 
+/// The regressor capacity of the fixed-size filter: at least every case's regressor count.
+const REGRESSORS: usize = 4;
+
 /// Asserts that `actual` matches `expected` within [`TOLERANCE`], relative to `max(1, |expected|)`.
 /// Two `NaN`s match.
 fn assert_close(what: &str, index: usize, actual: f64, expected: f64) {
@@ -62,7 +65,7 @@ fn row(case: &ArmaCase, t: usize) -> &'static [f64] {
 }
 
 /// A fixed-size filter at the stationary start of a case's model.
-fn filter(case: &ArmaCase) -> Filter<CAPACITY> {
+fn filter(case: &ArmaCase) -> Filter<CAPACITY, REGRESSORS> {
     Filter::new(&spec(case)).expect("reference models are stationary and fit")
 }
 

@@ -57,10 +57,10 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
 - `Arima::new(p, d, q).seasonal(P, D, Q, s).fit(y)`: exact Gaussian maximum likelihood with `sigma2` concentrated out, Hannan–Rissanen
   starting values and an in-crate BFGS; AR and MA parts stay stationary and invertible through statsmodels' PACF
   transforms. `Fitted` reports the log-likelihood, AIC, AICc and BIC.
-- `Filter<R>`: built from an `ArimaSpec` alone, it expands the seasonal polynomials into its own arrays, differences raw values in place, returns one-step innovations,
+- `Filter<R, M>`: built from an `ArimaSpec` alone, it expands the seasonal polynomials into its own arrays, differences raw values in place, returns one-step innovations,
   treats `NaN` as missing, and forecasts original-scale means, variances and intervals. `R` is the state capacity,
-  `ArimaSpec::capacity()`, i.e. `max(p + P s, q + Q s + 1) + d + D s` or the number of regressors if that is
-  larger; the airline model ARIMA(0, 1, 1)(0, 1, 1, 12) needs `R = 27`.
+  `ArimaSpec::states()`, i.e. `max(p + P s, q + Q s + 1) + d + D s`; the airline model ARIMA(0, 1, 1)(0, 1, 1, 12)
+  needs `R = 27`. `M` (default 0) holds the regression coefficients and does not grow the covariance.
 - Regression with ARIMA errors: `fit_exog`, `update_exog`, `forecast_exog_into` and friends model `y_t - x_t . beta`
   with the regressors differenced along with `y`, as R's `arima(xreg=)` does. [`examples/holidays_outages.rs`](https://github.com/sunsided/arima-rs/blob/main/examples/holidays_outages.rs)
   fits daily users with bank-holiday and outage dummies, and forecasts through a known upcoming holiday.
@@ -94,12 +94,13 @@ intervals and refits the model, and a counting allocator asserts that `Filter::n
 forecasts, the diagnostic tests and a refit allocate nothing. That binary comes out at about 52 KB of `.text`, of which
 the refit is about 21 KB. The filter's state lives inline:
 
-| Capacity | `size_of::<Filter<R>>()` | Fits, for example |
+| Capacity (`M = 0` unless given) | `size_of::<Filter<R, M>>()` | Fits, for example |
 |---|---|---|
-| `R = 4` | 368 bytes | ARIMA(1,1,1), ARIMA(2,1,2) |
-| `R = 8` | 944 bytes | ARIMA(2,0,1)(1,0,0,4) |
-| `R = 16` | 2,864 bytes | ARIMA(1,0,0)(1,0,0,12) |
-| `R = 27` | 7,176 bytes | the airline model ARIMA(0,1,1)(0,1,1,12) |
+| `R = 4` | 336 bytes | ARIMA(1,1,1), ARIMA(2,1,2) |
+| `R = 8` | 880 bytes | ARIMA(2,0,1)(1,0,0,4) |
+| `R = 16` | 2,736 bytes | ARIMA(1,0,0)(1,0,0,12) |
+| `R = 27` | 6,960 bytes | the airline model ARIMA(0,1,1)(0,1,1,12) |
+| `R = 3, M = 50` | 640 bytes | an ARMA(2,2) error with 50 regressors, such as Fourier terms |
 
 `Filter::new` needs about three times that on the stack while it solves for the starting covariance, and the
 forecasts about twice.

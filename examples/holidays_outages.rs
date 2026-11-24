@@ -70,11 +70,11 @@ fn main() {
         with.exog[1]
     );
 
-    // The filter is sized at compile time by `spec.capacity()`: 15 states, and the 2 regression
-    // coefficients fit within the same capacity.
+    // The filter is sized at compile time: `spec.states()` states and one slot per regression
+    // coefficient. The regressors do not enlarge the covariance.
     let spec = with.spec();
-    assert_eq!(spec.capacity(), 15);
-    let mut filter = Filter::<15>::new(&spec).expect("the fitted model is stationary");
+    assert_eq!((spec.states(), spec.exog.len()), (15, 2));
+    let mut filter = Filter::<15, 2>::new(&spec).expect("the fitted model is stationary");
     filter.warm_up_exog(&users, &regressors);
 
     let mut plain = Filter::<15>::new(&without.spec()).expect("the fitted model is stationary");
