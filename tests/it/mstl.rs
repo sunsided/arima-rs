@@ -36,4 +36,7 @@ fn rejects_what_statsmodels_cannot_decompose() {
     assert!(mstl(&y, &[4], 2).is_none(), "4 is half the length");
     assert!(mstl(&y, &[1], 2).is_none());
     assert!(mstl(&y, &[2], 0).is_none());
+    let mut gap = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
+    gap[4] = f64::INFINITY;
+    assert!(mstl(&gap, &[2], 2).is_none());
 }
