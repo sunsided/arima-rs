@@ -22,6 +22,8 @@
 mod auto;
 mod bfgs;
 #[cfg(feature = "alloc")]
+mod decompose;
+#[cfg(feature = "alloc")]
 mod ets;
 #[cfg(feature = "alloc")]
 mod hannan_rissanen;
@@ -33,6 +35,8 @@ mod pmm2;
 mod refit;
 #[cfg(feature = "alloc")]
 mod roots;
+#[cfg(feature = "alloc")]
+mod theta;
 mod transform;
 #[cfg(feature = "alloc")]
 mod var;
@@ -48,6 +52,8 @@ pub use mstl::{MstlArima, MstlForecast};
 #[cfg(feature = "alloc")]
 pub use pmm2::Pmm2Fit;
 pub use refit::{Refit, RefitOptions, Refitter};
+#[cfg(feature = "alloc")]
+pub use theta::{Theta, ThetaFit};
 #[cfg(feature = "alloc")]
 pub use var::{Var, VarFit, VarForecast, VarOrders, select_var_order};
 

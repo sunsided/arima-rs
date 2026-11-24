@@ -1,7 +1,6 @@
 //! VAR fits of backshift and anofox-forecast (foresight has none), scored on held-out rows.
 
-use crate::{milliseconds, normals};
-use std::time::Instant;
+use crate::{fastest, milliseconds, normals, rmse};
 
 /// The number of series.
 const K: usize = 3;
@@ -70,27 +69,4 @@ fn series(n: usize) -> (Vec<f64>, Vec<f64>) {
     let start = 100 * K;
     let cut = start + n * K;
     (y[start..cut].to_vec(), y[cut..].to_vec())
-}
-
-/// The fastest of `repeats` runs of `f`, with the last result.
-fn fastest<T>(repeats: usize, mut f: impl FnMut() -> T) -> (f64, T) {
-    let mut best = f64::INFINITY;
-    let mut result = f();
-    for _ in 0..repeats {
-        let start = Instant::now();
-        result = f();
-        best = best.min(start.elapsed().as_secs_f64());
-    }
-    (best, result)
-}
-
-/// The root mean squared error of `forecast` against `actual`.
-fn rmse(forecast: &[f64], actual: &[f64]) -> String {
-    let n = f64::from(u32::try_from(actual.len()).expect("short horizon"));
-    let sse: f64 = forecast
-        .iter()
-        .zip(actual)
-        .map(|(a, b)| (a - b) * (a - b))
-        .sum();
-    format!("{:.3}", (sse / n).sqrt())
 }

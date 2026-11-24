@@ -96,6 +96,9 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
   higher likelihood than R on every model of its conformance suite. The heap-free `EtsFilter` continues from a fit's
   final states at `O(1)` per value and forecasts with R's analytic intervals (classes 1 to 3, the last in caller
   scratch), corrected where R's are off (ETS(A,N,A), ETS(M,N,A), ETS(M,Ad,M)).
+- `Theta` and `ThetaFilter<M>`: the Theta method as R's `thetaf` (simple exponential smoothing with drift, Hyndman
+  and Billah 2003), with its seasonality test and multiplicative deseasonalising; the heap-free filter keeps the
+  level learning and forecasts with R's intervals.
 - `Var`, `select_var_order` and `OnlineVar<K, D>`: vector autoregression on several series at once, with exogenous
   regressors (VARX) and lag selection by AIC, BIC, HQIC or FPE, matching statsmodels' `VAR` to 1e-8. The heap-free
   `OnlineVar` streams a row of `K` values per step and scores it by the squared Mahalanobis distance of its errors,

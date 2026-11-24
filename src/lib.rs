@@ -70,8 +70,8 @@ pub use crate::filter::{ArimaSpec, Filter, FilterError, Seasonal};
 #[cfg(feature = "alloc")]
 pub use crate::fit::{
     Arima, ArmaCoefficients, AutoArima, AutoEts, AutoFit, Criterion, Ets, EtsFit, Fitted, Fixed,
-    FourierFit, MstlArima, MstlForecast, Pmm2Fit, Var, VarFit, VarForecast, VarOrders,
-    hannan_rissanen, nsdiffs, select_var_order,
+    FourierFit, MstlArima, MstlForecast, Pmm2Fit, Theta, ThetaFit, Var, VarFit, VarForecast,
+    VarOrders, hannan_rissanen, nsdiffs, select_var_order,
 };
 pub use crate::fit::{FitError, Method, Refit, RefitOptions, Refitter};
 #[cfg(feature = "alloc")]
@@ -88,6 +88,7 @@ pub use crate::stl::{
     Decomposition, MSTL_ITERATIONS, MultiDecomposition, PeriodCandidate,
     SEASONAL_STRENGTH_THRESHOLD, find_period, mstl, stl, stl_with,
 };
+pub use crate::theta::{ThetaFilter, ThetaSpec};
 pub use crate::time_series::{TimeSeries, TimeSeriesError};
 pub use crate::var::{OnlineVar, VarSpec};
 #[cfg(feature = "alloc")]
@@ -118,6 +119,7 @@ mod special;
 mod state_space;
 #[cfg(feature = "alloc")]
 mod stl;
+mod theta;
 mod time_series;
 mod var;
 #[cfg(kani)]
