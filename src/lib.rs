@@ -55,6 +55,8 @@ extern crate std;
 
 #[cfg(feature = "alloc")]
 pub use crate::autoregressive::{ArCoefficients, burg, yule_walker};
+#[cfg(feature = "alloc")]
+pub use crate::box_cox::{box_cox, box_cox_lambda};
 pub use crate::conformal::Conformal;
 #[cfg(feature = "alloc")]
 pub use crate::diagnostics::ndiffs;
@@ -91,6 +93,8 @@ use core::borrow::Borrow;
 
 #[cfg(feature = "alloc")]
 mod autoregressive;
+#[cfg(feature = "alloc")]
+mod box_cox;
 mod buffer;
 mod conformal;
 mod diagnostics;

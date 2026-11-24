@@ -234,27 +234,41 @@ def multi_seasonal(n, periods, seed):
     return y
 
 
-# (name, doc, length, generating periods, periods passed, iterate, seed)
+# (name, doc, length, generating periods, periods passed, iterate, seed[, Box-Cox lambda or "auto"])
 MSTL_CASES = [
     ("DAILY_WEEKLY", "Hourly data with daily and weekly patterns, four weeks.", 672, (24, 168), (168, 24), 2, 41),
     ("THREE", "Periods 3, 7 and 12 on 240 values, three passes.", 240, (3, 7, 12), (12, 3, 7), 3, 42),
     ("SINGLE", "One period, 12, so one pass with seasonal window 11.", 96, (12,), (12,), 2, 43),
     ("DROPPED", "Periods 4 and 30 on 50 values: 30 is at least half the length and is dropped.", 50, (4,), (4, 30), 2, 44),
+    ("BOX_COX_AUTO", "Periods 7 and 12 on a positive series, Box-Cox lambda chosen by MLE.", 168, (7, 12), (7, 12), 2, 45, "auto"),
+    ("BOX_COX_HALF", "Periods 4 and 9 on a positive series, Box-Cox lambda 0.5.", 120, (4, 9), (4, 9), 2, 46, 0.5),
+    ("BOX_COX_LOG", "Period 12 on a positive series, Box-Cox lambda 0 (the logarithm).", 96, (12,), (12,), 2, 47, 0.0),
 ]
 
 
-def mstl_case(name, doc, n, generating, periods, iterate, seed):
+def mstl_case(name, doc, n, generating, periods, iterate, seed, lmbda=None):
     """Render one `MstlCase` from statsmodels' `MSTL`."""
     y = multi_seasonal(n, generating, seed)
+    if lmbda is not None:
+        y = np.exp(0.2 * (y - y.mean()) / y.std()) * 10.0
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        result = MSTL(y, periods=list(periods), iterate=iterate).fit()
+        # statsmodels skips the transform for lmbda=0 (`elif self.lmbda:` is false), so the
+        # logarithm is applied here for that case.
+        if lmbda == 0.0:
+            model = MSTL(np.log(y), periods=list(periods), iterate=iterate)
+        else:
+            model = MSTL(y, periods=list(periods), iterate=iterate, lmbda=lmbda)
+        result = model.fit()
+    used = model.est_lmbda if lmbda == "auto" else lmbda
     seasonal = np.asarray(result.seasonal).reshape(n, -1)
     lines = [f"/// {doc}", f"pub const {name}: MstlCase = MstlCase {{"]
     lines += [
         f"    periods: &{list(periods)},",
         f"    iterate: {iterate},",
         f"    kept: {seasonal.shape[1]},",
+        f"    lambda: {rust_float(np.nan if used is None else used)},",
+        f"    auto_lambda: {str(lmbda == 'auto').lower()},",
         f"    values: {rust_array(y)},",
         f"    seasonal: {rust_array(seasonal.T.ravel())},",
         f"    trend: {rust_array(result.trend)},",
@@ -279,9 +293,14 @@ pub struct MstlCase {{
     pub iterate: usize,
     /// How many periods statsmodels kept.
     pub kept: usize,
+    /// The Box-Cox lambda the series was transformed with; `NaN` for none.
+    pub lambda: f64,
+    /// Whether statsmodels chose `lambda` (`lmbda="auto"`, scipy's MLE).
+    pub auto_lambda: bool,
     /// The series.
     pub values: &'static [f64],
-    /// The seasonal components of the kept periods, ascending, one after another.
+    /// The seasonal components of the kept periods, ascending, one after another, on the
+    /// Box-Cox scale if `lambda` is not `NaN`.
     pub seasonal: &'static [f64],
     /// The trend component.
     pub trend: &'static [f64],

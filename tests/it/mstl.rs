@@ -1,7 +1,7 @@
 //! Checks the MSTL decomposition against statsmodels.
 
 use crate::mstl_data::ALL;
-use backshift::{AutoArima, FitError, mstl};
+use backshift::{AutoArima, FitError, box_cox, box_cox_lambda, mstl};
 
 /// Absolute tolerance against statsmodels, as for STL.
 const TOLERANCE: f64 = 1e-9;
@@ -17,7 +17,22 @@ fn assert_close(what: &str, actual: &[f64], expected: &[f64]) {
 #[test]
 fn matches_statsmodels() {
     for case in ALL {
-        let parts = mstl(case.values, case.periods, case.iterate).unwrap();
+        let values = if case.lambda.is_nan() {
+            case.values.to_vec()
+        } else {
+            if case.auto_lambda {
+                // scipy's Brent stops at a relative tolerance of about 1.5e-8.
+                let lambda = box_cox_lambda(case.values).unwrap();
+                assert!(
+                    (lambda - case.lambda).abs() < 1e-6,
+                    "{lambda} vs {}",
+                    case.lambda
+                );
+            }
+
+            box_cox(case.values, case.lambda).unwrap()
+        };
+        let parts = mstl(&values, case.periods, case.iterate).unwrap();
         assert_eq!(parts.seasonal.len(), case.kept);
         let n = case.values.len();
         for (i, component) in parts.seasonal.iter().enumerate() {

@@ -86,7 +86,8 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
   `nsdiffs` choosing `d` and `D`; AICc by default, AIC or BIC on request.
 - `stl`: STL decomposition with statsmodels' defaults, and the seasonal strength it implies.
 - `mstl`: MSTL for several seasonal periods (daily and weekly on hourly data), and `stl_with` for a chosen seasonal
-  window; both match statsmodels to 1e-9.
+  window; both match statsmodels to 1e-9. `box_cox` and `box_cox_lambda` (scipy's maximum-likelihood lambda) transform
+  the series first, as statsmodels' `MSTL(lmbda=...)` does.
   `AutoArima::fit_mstl` forecasts with MSTL plus ARIMA (R's `stlf`): ARIMA on the seasonally adjusted series, each
   seasonal component's last cycle repeated; the intervals ignore the seasonal components' uncertainty.
   `MstlArima::stream` turns the fit into a heap-free `MstlFilter<R, L>` for devices: a filter on the adjusted series plus
