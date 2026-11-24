@@ -208,6 +208,7 @@ impl Arima {
             nobs,
             iterations,
             converged,
+            fixed: 0,
         })
     }
 }

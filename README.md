@@ -57,7 +57,8 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
 - `Arima::new(p, d, q).seasonal(P, D, Q, s).fit(y)`: exact Gaussian maximum likelihood with `sigma2` concentrated out, Hannan–Rissanen
   starting values and an in-crate BFGS; AR and MA parts stay stationary and invertible through statsmodels' PACF
   transforms. `Fitted` reports the log-likelihood, AIC, AICc and BIC.
-  `fit_from` starts the optimiser from a previous fit or a related model instead (R's `arima(init=)`).
+  `fit_from` starts the optimiser from a previous fit or a related model instead (R's `arima(init=)`), and `fit_fixed`
+  keeps whole parts at given values (R's `arima(fixed=)`, statsmodels' `fix_params`).
   `fit_pmm2` refines a fit by PMM2 for skewed innovations; on simulated Gamma(2,1) innovations its AR estimates had
   1.4–2× less mean squared error than maximum likelihood, and the same with Gaussian ones.
 - `Filter<R, M>`: built from an `ArimaSpec` alone, it expands the seasonal polynomials into its own arrays, differences raw values in place, returns one-step innovations,

@@ -39,6 +39,10 @@ pub(crate) struct Objective<'a> {
     dx: &'a [f64],
     /// The number of regressors.
     columns: usize,
+    /// Coefficients held fixed, laid out like `u` in constrained form: `NaN` marks a free
+    /// one. Empty when every coefficient is free. A fixed coefficient overrides what `u`
+    /// maps to, so the objective is flat in that coordinate and the optimiser leaves it.
+    pinned: &'a [f64],
     /// The constrained parameters of the last evaluation, laid out like `u`.
     params: &'a mut [f64],
     /// Scratch for [`transform::constrain`].
@@ -58,7 +62,8 @@ impl<'a> Objective<'a> {
     }
 
     /// An objective over the differenced series `dy` and the column-major differenced
-    /// regressors `dx`, working in `scratch`.
+    /// regressors `dx`, working in `scratch`, with the coefficients of `pinned` held fixed
+    /// (see [`Objective::pinned`]).
     ///
     /// # Panics
     ///
@@ -68,6 +73,7 @@ impl<'a> Objective<'a> {
         dy: &'a [f64],
         dx: &'a [f64],
         columns: usize,
+        pinned: &'a [f64],
         mut scratch: &'a mut [f64],
     ) -> Self {
         let parameters = model.parameter_count(columns);
@@ -76,6 +82,7 @@ impl<'a> Objective<'a> {
             dy,
             dx,
             columns,
+            pinned,
             params: take(&mut scratch, parameters),
             work: take(&mut scratch, parameters),
             centered: take(&mut scratch, dy.len()),
@@ -166,6 +173,11 @@ impl<'a> Objective<'a> {
         }
 
         self.params[start..].copy_from_slice(&u[start..]);
+        for (value, &pin) in self.params.iter_mut().zip(self.pinned) {
+            if !pin.is_nan() {
+                *value = pin;
+            }
+        }
     }
 }
 

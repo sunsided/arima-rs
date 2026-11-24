@@ -204,6 +204,31 @@ impl Arima {
         self.fit_exog_with(y, regressors, columns, None)
     }
 
+    /// The fixed coefficients of `start` laid out like the optimiser's vector, `NaN` where
+    /// free; empty if nothing is fixed.
+    fn pinned(&self, start: &ArimaSpec<'_>, fixed: Fixed) -> Vec<f64> {
+        if fixed == Fixed::NONE {
+            return Vec::new();
+        }
+
+        let part = |values: &[f64], pin: bool| {
+            values
+                .iter()
+                .map(move |&v| if pin { v } else { f64::NAN })
+                .collect::<Vec<f64>>()
+        };
+        let mut pinned = part(start.ar, fixed.ar);
+        pinned.extend(part(start.ma, fixed.ma));
+        pinned.extend(part(start.seasonal.ar, fixed.seasonal_ar));
+        pinned.extend(part(start.seasonal.ma, fixed.seasonal_ma));
+        if self.mean {
+            pinned.extend(part(&[start.mean], fixed.mean));
+        }
+
+        pinned.extend(part(start.exog, fixed.exog));
+        pinned
+    }
+
     /// Like [`Arima::fit`], but the optimiser starts from the coefficients of `start`
     /// instead of Hannan–Rissanen, as R's `arima(init=)` and statsmodels' `start_params` do.
     ///
@@ -251,6 +276,63 @@ impl Arima {
         columns: usize,
         start: &ArimaSpec<'_>,
     ) -> Result<Fitted, FitError> {
+        self.fit_exog_fixed(y, regressors, columns, start, Fixed::NONE)
+    }
+
+    /// Like [`Arima::fit_from`], but the parts of `fixed` keep the values of `start` and
+    /// only the rest is estimated, as R's `arima(fixed=)` and statsmodels' `fix_params`
+    /// do for whole parts.
+    ///
+    /// The information criteria count only the estimated coefficients, as R does
+    /// ([`Fitted::fixed`] holds how many were fixed). A fixed AR or MA part must be
+    /// stationary or invertible.
+    ///
+    /// # Errors
+    ///
+    /// As for [`Arima::fit_from`]; [`FitError::Degenerate`] also if a fixed part is not
+    /// stationary (the likelihood does not exist there).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use backshift::{Arima, ArimaSpec, Fixed, Seasonal};
+    ///
+    /// let y: Vec<f64> = (0..80).map(|t| [1.0, -0.5, 0.3, -0.8][t % 4] + 0.01 * ((t * 13) % 7) as f64).collect();
+    /// // Keep the seasonal MA at -0.6 and estimate the rest.
+    /// let start = ArimaSpec {
+    ///     ma: &[0.0],
+    ///     seasonal: Seasonal { ma: &[-0.6], period: 4, ..Seasonal::NONE },
+    ///     ..ArimaSpec::default()
+    /// };
+    /// let model = Arima::new(0, 0, 1).seasonal(0, 0, 1, 4);
+    /// let fixed = Fixed { seasonal_ma: true, ..Fixed::NONE };
+    /// let fitted = model.fit_fixed(&y, &start, fixed).unwrap();
+    /// assert_eq!(fitted.seasonal_ma, [-0.6]);
+    /// assert_eq!(fitted.fixed, 1);
+    /// ```
+    pub fn fit_fixed(
+        &self,
+        y: &[f64],
+        start: &ArimaSpec<'_>,
+        fixed: Fixed,
+    ) -> Result<Fitted, FitError> {
+        self.fit_exog_fixed(y, &[], 0, start, fixed)
+    }
+
+    /// Like [`Arima::fit_exog_from`], with the parts of `fixed` held at the values of
+    /// `start` (see [`Arima::fit_fixed`]).
+    ///
+    /// # Errors
+    ///
+    /// As for [`Arima::fit_exog_from`] and [`Arima::fit_fixed`].
+    pub fn fit_exog_fixed(
+        &self,
+        y: &[f64],
+        regressors: &[f64],
+        columns: usize,
+        start: &ArimaSpec<'_>,
+        fixed: Fixed,
+    ) -> Result<Fitted, FitError> {
         if regressors.len() != y.len() * columns {
             return Err(FitError::RegressorShape {
                 expected: y.len() * columns,
@@ -266,7 +348,7 @@ impl Arima {
             return Err(FitError::StartMismatch);
         }
 
-        self.fit_exog_with(y, regressors, columns, Some(start))
+        self.fit_exog_with(y, regressors, columns, Some((start, fixed)))
     }
 
     /// [`Arima::fit_exog`] from `start`, or from Hannan–Rissanen and least squares without one.
@@ -275,7 +357,7 @@ impl Arima {
         y: &[f64],
         regressors: &[f64],
         columns: usize,
-        start: Option<&ArimaSpec<'_>>,
+        start: Option<(&ArimaSpec<'_>, Fixed)>,
     ) -> Result<Fitted, FitError> {
         if regressors.len() != y.len() * columns {
             return Err(FitError::RegressorShape {
@@ -301,8 +383,9 @@ impl Arima {
             return Err(FitError::TooShort { needed, present });
         }
 
+        let pinned = start.map_or_else(Vec::new, |(spec, fixed)| self.pinned(spec, fixed));
         let mut x = match start {
-            Some(spec) => self.start_from(spec),
+            Some((spec, _)) => self.start_from(spec),
             None => {
                 let beta_start = self.least_squares_start(&dy, &dx, columns);
                 let mut residual = vec![0.0; dy.len()];
@@ -312,7 +395,7 @@ impl Arima {
         };
 
         let mut scratch = vec![0.0; Objective::scratch_len(self, dy.len(), columns)];
-        let mut objective = Objective::new(self, &dy, &dx, columns, &mut scratch);
+        let mut objective = Objective::new(self, &dy, &dx, columns, &pinned, &mut scratch);
         let mut bfgs_scratch = vec![0.0; bfgs::scratch_len(x.len())];
         let max_iterations = bfgs::Options::default().max_iterations;
         let estimate =
@@ -335,6 +418,7 @@ impl Arima {
             nobs: estimate.nobs,
             iterations: estimate.iterations,
             converged: estimate.converged,
+            fixed: pinned.iter().filter(|v| !v.is_nan()).count(),
         })
     }
 
@@ -480,12 +564,14 @@ pub struct Fitted {
     pub iterations: usize,
     /// Whether the optimiser met its tolerance rather than its iteration limit.
     pub converged: bool,
+    /// How many coefficients were held fixed ([`Arima::fit_fixed`]) rather than estimated.
+    pub fixed: usize,
 }
 
 #[cfg(feature = "alloc")]
 impl Fitted {
     /// The number of estimated parameters: `p + q + P + Q`, the regression coefficients,
-    /// one for the mean if estimated, and one for `sigma2`. This is the `k` of the
+    /// one for the mean if estimated, and one for `sigma2`, less the [`Fitted::fixed`] ones. This is the `k` of the
     /// information criteria.
     #[must_use]
     pub fn parameters(&self) -> usize {
@@ -496,6 +582,7 @@ impl Fitted {
             + self.exog.len()
             + usize::from(self.with_mean)
             + 1
+            - self.fixed
     }
 
     /// Akaike's information criterion, `-2 loglike + 2k`.
@@ -549,6 +636,37 @@ impl Fitted {
             sigma2: self.sigma2,
         }
     }
+}
+
+/// Which whole parts of a model [`Arima::fit_fixed`] keeps at their start values.
+#[cfg(feature = "alloc")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Fixed {
+    /// Keep the AR coefficients.
+    pub ar: bool,
+    /// Keep the MA coefficients.
+    pub ma: bool,
+    /// Keep the seasonal AR coefficients.
+    pub seasonal_ar: bool,
+    /// Keep the seasonal MA coefficients.
+    pub seasonal_ma: bool,
+    /// Keep the mean, if the model estimates one.
+    pub mean: bool,
+    /// Keep the regression coefficients.
+    pub exog: bool,
+}
+
+#[cfg(feature = "alloc")]
+impl Fixed {
+    /// Nothing fixed: every coefficient is estimated.
+    pub const NONE: Self = Self {
+        ar: false,
+        ma: false,
+        seasonal_ar: false,
+        seasonal_ma: false,
+        mean: false,
+        exog: false,
+    };
 }
 
 /// Why a model could not be fitted.
@@ -706,6 +824,7 @@ mod tests {
             nobs: 40,
             iterations: 3,
             converged: true,
+            fixed: 0,
         };
         assert_eq!(fitted.parameters(), 5);
         assert_eq!(fitted.aic(), 110.0);
