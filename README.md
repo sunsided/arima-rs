@@ -269,17 +269,17 @@ of 15 repeats (5 for the searches) on an Intel Core i7-13700H with Rust 1.100, r
 
 | Model | backshift | backshift, approximate | foresight | anofox-forecast |
 |---|---|---|---|---|
-| ARMA(2,1), n=300 | 0.34 ms, −423.0037 | 0.17 ms, −423.0061 | 16.99 ms, −423.0037 | 0.42 ms, −423.0195 |
-| ARIMA(1,1,1) with drift, n=300 | 0.22 ms, −435.5482 | 0.12 ms, −435.5516 | 8.12 ms, −435.5482 | 0.61 ms, −435.5591 |
-| airline (0,1,1)(0,1,1,12), n=144 | 0.98 ms, −194.3233 | 0.12 ms, −194.3261 | 11.50 ms, −194.3233 | 0.23 ms, −195.2358 |
+| ARMA(2,1), n=300 | 0.38 ms, −423.0037 | 0.19 ms, −423.0061 | 18.99 ms, −423.0037 | 0.48 ms, −423.0195 |
+| ARIMA(1,1,1) with drift, n=300 | 0.24 ms, −435.5482 | 0.13 ms, −435.5516 | 8.96 ms, −435.5482 | 0.68 ms, −435.5591 |
+| airline (0,1,1)(0,1,1,12), n=144 | 1.06 ms, −194.3233 | 0.13 ms, −194.3261 | 12.78 ms, −194.3233 | 0.26 ms, −195.2358 |
 
 Fully automatic auto-ARIMA, each crate choosing its own `d` and `D`:
 
 | Series | backshift | backshift, approximate | foresight | anofox-forecast |
 |---|---|---|---|---|
-| ARMA(2,1), n=300 | 7.0 ms, (2,0,1) | 3.8 ms, (2,0,1) | 68.4 ms, (2,0,1) | 7.2 ms, (2,0,1) |
-| ARIMA(1,1,1), n=300 | 5.3 ms, (0,1,2) | 2.7 ms, (0,1,2) | 49.9 ms, (0,1,2) | 4.7 ms, (0,1,2) |
-| airline, n=144 | 85.3 ms, (0,1,1)(0,1,1,12) | 5.5 ms, (0,1,1)(0,1,1,12) | 333.6 ms, (0,2,2)(1,0,1,12) | 3,582 ms, (0,2,2)(1,0,1,12) |
+| ARMA(2,1), n=300 | 7.8 ms, (2,0,1) | 4.2 ms, (2,0,1) | 75.1 ms, (2,0,1) | 8.0 ms, (2,0,1) |
+| ARIMA(1,1,1), n=300 | 5.9 ms, (0,1,2) | 3.1 ms, (0,1,2) | 55.8 ms, (0,1,2) | 5.2 ms, (0,1,2) |
+| airline, n=144 | 93.5 ms, (0,1,1)(0,1,1,12) | 6.2 ms, (0,1,1)(0,1,1,12) | 368.9 ms, (0,2,2)(1,0,1,12) | 4,030 ms, (0,2,2)(1,0,1,12) |
 
 On the non-seasonal series all crates pick the same model. On the seasonal series backshift recovers the generating
 airline model, because its STL seasonal-strength test finds the seasonal unit root; the other two crates miss it and
@@ -299,23 +299,42 @@ warm start (R's `CSS-ML`); its approximate fits stop there, like R's `method = "
 model while landing within 0.004 of the maximum, closer than anofox-forecast on all three. The approximate search
 refits its choice exactly, so the model it returns is an exact fit. Neither of the other two crates streams an ARIMA
 model (anofox-forecast updates its exponential-smoothing models incrementally): backshift's `Filter::<27>::update` takes
-about 0.33 µs per value for the airline model.
+about 0.38 µs per value for the airline model.
 
 ETS, scored on the last values of each series, which no crate sees (root mean squared error, lower is better):
 
 | ETS fit | backshift | foresight | anofox-forecast |
 |---|---|---|---|
-| damped trend (A,Ad,N), n=120 | 2.5 ms, 1.950 | 2.4 ms, 1.950 | 0.07 ms, 1.660 |
-| trend + monthly season (A,A,A), n=144 | 4.4 ms, 1.195 | 53.1 ms, 1.195 | 10.6 ms, 1.195 |
+| damped trend (A,Ad,N), n=120 | 2.6 ms, 1.950 | 2.6 ms, 1.950 | 0.09 ms, 1.660 |
+| trend + monthly season (A,A,A), n=144 | 4.7 ms, 1.195 | 56.3 ms, 1.195 | 11.3 ms, 1.195 |
 
 | Automatic ETS | backshift | foresight | anofox-forecast |
 |---|---|---|---|
-| damped trend, n=120 | 3.8 ms, (A,Ad,N) | 10.8 ms, (A,Ad,N) | 2.2 ms, (A,Ad,N) |
-| trend + monthly season, n=144 | 30.5 ms, (A,A,A) | 537.3 ms, (A,A,A) | 228.6 ms, (A,A,A) |
+| damped trend, n=120 | 9.2 ms, (A,Ad,N) | 11.3 ms, (A,Ad,N) | 2.3 ms, (A,Ad,N) |
+| trend + monthly season, n=144 | 229.0 ms, (A,A,A) | 559.6 ms, (A,A,A) | 224.5 ms, (A,A,A) |
 
-All three choose the same models. On the seasonal series backshift fits and searches fastest at the same forecast
-error. On the damped series anofox-forecast is fastest and forecasts best: its estimates differ from backshift's and
+All three choose the same models. backshift's automatic search covers R's whole default set, multiplicative errors
+and seasons included, which it fits jointly rather than by least squares; that is most of its search time, and level
+with anofox-forecast on the seasonal series. On the seasonal series backshift fits fastest at the same forecast error.
+On the damped series anofox-forecast is fastest and forecasts best: its estimates differ from backshift's and
 foresight's, which agree with each other (and backshift's reach R's likelihood or higher).
+
+The other families, scored the same way (GARCH by the log-likelihood of each crate's estimate under
+`tseries::garch`'s definition, higher is better):
+
+| Model | backshift | foresight | anofox-forecast |
+|---|---|---|---|
+| VAR(2), 3 series, n=500, fit and forecast | 0.04 ms, 1.218 | – | 0.09 ms, 1.218 |
+| Theta, trend, n=120 | 0.19 ms, 3.431 | 0.09 ms, 3.431 | 0.05 ms, 3.431 |
+| Theta, monthly season, n=144 | 0.21 ms, 1.801 | 0.11 ms, 1.801 | 0.06 ms, 1.801 |
+| SBA, optimised alpha, n=150 | 0.05 ms, 2.429 | 0.02 ms, 2.429 | 0.02 ms, 2.429 |
+| TSB, n=150 | 0.30 ms (optimised), 2.400 | < 0.01 ms, 2.366 | < 0.01 ms (fixed 0.1), 2.366 |
+| GARCH(1,1), n=1000 | 3.1 ms, −1332.851 | – | 23.9 ms, −1332.851 |
+
+All crates agree on VAR, Theta, SBA and GARCH. backshift's Theta and Croston fits are a fraction of a millisecond
+slower than the others: it estimates Theta's smoothing by R's likelihood and searches Croston's parameters on a grid
+before refining them. Its optimised TSB fits the history better but forecasts this hold-out slightly worse than the
+fixed parameters of the other two.
 
 Reproduce with `cargo run --release --manifest-path ci/compare/Cargo.toml` (add `--features rayon` for the parallel
 seasonal search); `cargo bench` runs the in-crate Criterion benchmarks.
