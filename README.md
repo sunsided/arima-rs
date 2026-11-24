@@ -89,11 +89,13 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
   `nsdiffs` choosing `d` and `D`; AICc by default, AIC or BIC on request. `.approximation(true)` ranks the candidates
   by CSS fits and refits only the winner exactly (R's `approximation=TRUE`): 15× faster on the airline series, with
   the same choice there and on 7 of the 8 pmdarima series (the eighth is a tie within 0.01 AICc).
-- `Ets`, `AutoEts` and `EtsFilter<M>`: exponential smoothing in R's `forecast::ets` form (additive errors; no, additive
-  or damped trend; no or additive season). The fit concentrates the initial states out by least squares and searches
-  only the smoothing parameters, so it reaches the same or a higher likelihood than R on every model of its conformance
-  suite, and `AutoEts` picks R's model on each series. The heap-free `EtsFilter` continues from a fit's final states at
-  `O(1)` per value and forecasts with R's analytic intervals (corrected for R's misplaced `gamma` in ETS(A,N,A)).
+- `Ets`, `AutoEts` and `EtsFilter<M>`: exponential smoothing in R's `forecast::ets` form, all 15 models of R's default
+  set (additive or multiplicative error; no, additive or damped trend; no, additive or multiplicative season). With
+  additive components the fit concentrates the initial states out by least squares and searches only the smoothing
+  parameters; with multiplicative ones it optimises them jointly from R's starting states. It reaches the same or a
+  higher likelihood than R on every model of its conformance suite. The heap-free `EtsFilter` continues from a fit's
+  final states at `O(1)` per value and forecasts with R's analytic intervals (classes 1 to 3, the last in caller
+  scratch), corrected where R's are off (ETS(A,N,A), ETS(M,N,A), ETS(M,Ad,M)).
 - `stl`: STL decomposition with statsmodels' defaults, and the seasonal strength it implies.
 - `mstl`: MSTL for several seasonal periods (daily and weekly on hourly data), and `stl_with` for a chosen seasonal
   window; both match statsmodels to 1e-9. `box_cox` and `box_cox_lambda` (scipy's maximum-likelihood lambda) transform

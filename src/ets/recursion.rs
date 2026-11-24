@@ -6,7 +6,13 @@
 //! oldest state and moves `head` onto it, so it costs `O(1)` instead of shifting `m`
 //! values as R does.
 
-/// The smoothing parameters of an additive ETS model, as the recursion takes them.
+/// Below this modulus R's `etscalc` treats a divisor as zero and uses [`HUGE`] instead.
+const TOLERANCE: f64 = 1e-10;
+
+/// R's stand-in (`HUGEN`) for the quotient by a divisor of about zero.
+const HUGE: f64 = 1e10;
+
+/// The smoothing parameters of an ETS model, as the recursion takes them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Smoothing {
     /// The level smoothing parameter.
@@ -19,15 +25,45 @@ pub(crate) struct Smoothing {
     pub(crate) phi: f64,
     /// Whether the model has a trend (and so a slope state).
     pub(crate) trend: bool,
+    /// Whether the season multiplies the level and trend instead of adding to them.
+    pub(crate) multiplicative_season: bool,
 }
 
 impl Smoothing {
-    /// The one-step forecast `l + phi b + s_m` from the current states.
+    /// The one-step forecast `(l + phi b) + s_m`, or `(l + phi b) s_m` with a multiplicative
+    /// season, from the current states.
     ///
     /// `seasonal` is the ring of seasonal states with the most recent at `head`, or empty.
     pub(crate) fn forecast(&self, level: f64, slope: f64, seasonal: &[f64], head: usize) -> f64 {
         let trend = if self.trend { self.phi * slope } else { 0.0 };
-        level + trend + oldest(seasonal, head).map_or(0.0, |i| seasonal[i])
+        let base = level + trend;
+        match oldest(seasonal, head) {
+            None => base,
+            Some(i) => self.season(base, seasonal[i]),
+        }
+    }
+
+    /// `base` with the seasonal state `state` applied: added, or multiplied.
+    fn season(&self, base: f64, state: f64) -> f64 {
+        if self.multiplicative_season {
+            base * state
+        } else {
+            base + state
+        }
+    }
+
+    /// `y` with the seasonal state `state` taken out: subtracted, or divided (R's `HUGE` for
+    /// a divisor of about zero).
+    fn deseason(&self, y: f64, state: f64) -> f64 {
+        if !self.multiplicative_season {
+            return y - state;
+        }
+
+        if state.abs() < TOLERANCE {
+            HUGE
+        } else {
+            y / state
+        }
     }
 
     /// Moves the states on with the observed value `y`, as R's `etscalc` `update`.
@@ -46,22 +82,25 @@ impl Smoothing {
         let damped_slope = if self.trend { self.phi * *slope } else { 0.0 };
         let base = *level + damped_slope;
         let oldest_index = oldest(seasonal, *head);
-        let oldest_state = oldest_index.map_or(0.0, |i| seasonal[i]);
-        let new_level = base + self.alpha * (y - oldest_state - base);
+        let adjusted = oldest_index.map_or(y, |i| self.deseason(y, seasonal[i]));
+        let new_level = base + self.alpha * (adjusted - base);
         if self.trend {
             *slope = damped_slope + self.beta / self.alpha * (new_level - *level - damped_slope);
         }
 
         if let Some(i) = oldest_index {
-            seasonal[i] = oldest_state + self.gamma * (y - base - oldest_state);
+            // The seasonal state learns from `y` with the level and trend taken out.
+            let observed = self.deseason(y, base);
+            seasonal[i] += self.gamma * (observed - seasonal[i]);
             *head = i;
         }
 
         *level = new_level;
     }
 
-    /// Writes the forecast means `l + phi_h b + s` for horizons `1..=mean.len()`, where
-    /// `phi_h = phi + ... + phi^h` and `s` is the seasonal state of that horizon.
+    /// Writes the forecast means `(l + phi_h b) + s` (or times `s` with a multiplicative
+    /// season) for horizons `1..=mean.len()`, where `phi_h = phi + ... + phi^h` and `s` is
+    /// the seasonal state of that horizon.
     pub(crate) fn forecast_means(
         &self,
         level: f64,
@@ -78,12 +117,11 @@ impl Smoothing {
             damping += power;
             let trend = if self.trend { damping * slope } else { 0.0 };
             // The state for horizon `h + 1` is `m - 1 - h % m` places older than the newest.
-            let season = if m == 0 {
-                0.0
+            *value = if m == 0 {
+                level + trend
             } else {
-                seasonal[(head + m - 1 - h % m) % m]
+                self.season(level + trend, seasonal[(head + m - 1 - h % m) % m])
             };
-            *value = level + trend + season;
         }
     }
 
@@ -101,6 +139,40 @@ impl Smoothing {
             let season = if m > 0 && j % m == 0 { self.gamma } else { 0.0 };
             let c = self.alpha + self.beta * damping + season;
             sum += c * c;
+        }
+    }
+}
+
+impl Smoothing {
+    /// Turns the class-1 variances in `variance` into R's class-2 ones, for a multiplicative
+    /// error with no or an additive season: `(1 + sigma2) theta_h - mu_h^2`, with
+    /// `theta_1 = mu_1^2` and `theta_h = mu_h^2 + sigma2 (c_1^2 theta_(h-1) + ... +
+    /// c_(h-1)^2 theta_1)`.
+    ///
+    /// `mean` holds the forecast means `mu_h`. `variance` is overwritten: it holds `theta`
+    /// while the recursion runs.
+    pub(crate) fn relative_variances(
+        &self,
+        m: usize,
+        sigma2: f64,
+        mean: &[f64],
+        variance: &mut [f64],
+    ) {
+        for h in 0..variance.len() {
+            let mut sum = 0.0;
+            let (mut damping, mut power) = (0.0, 1.0);
+            for i in 1..=h {
+                power *= self.phi;
+                damping += power;
+                let season = if m > 0 && i % m == 0 { self.gamma } else { 0.0 };
+                let c = self.alpha + self.beta * damping + season;
+                sum += c * c * variance[h - i];
+            }
+            variance[h] = mean[h] * mean[h] + sigma2 * sum;
+        }
+
+        for (value, mu) in variance.iter_mut().zip(mean) {
+            *value = (1.0 + sigma2) * *value - mu * mu;
         }
     }
 }
@@ -132,6 +204,7 @@ mod tests {
         gamma: 0.1,
         phi: 1.0,
         trend: true,
+        multiplicative_season: false,
     };
 
     #[test]

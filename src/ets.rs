@@ -17,6 +17,7 @@
 //!
 //! which is R's update in the error-correction form. `phi = 1` without damping.
 
+mod class3;
 mod recursion;
 
 pub(crate) use recursion::Smoothing;
@@ -27,6 +28,17 @@ use crate::filter::FilterError;
 use crate::math;
 use crate::normal::normal_quantile;
 use crate::state_space::Innovation;
+
+/// How an ETS component combines: added to the forecast, or multiplying it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Form {
+    /// The component adds to the forecast; for the error, `y = f + e`.
+    #[default]
+    Additive,
+    /// The component multiplies the forecast; for the error, `y = f (1 + e)`. It needs
+    /// positive values.
+    Multiplicative,
+}
 
 /// The trend of an ETS model.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -91,18 +103,22 @@ impl Trend {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EtsSpec<'a> {
+    /// The error: additive, or multiplicative (relative to the forecast).
+    pub error: Form,
     /// The level smoothing parameter, `0 < alpha < 1`.
     pub alpha: f64,
     /// The trend and its parameters.
     pub trend: Trend,
+    /// Whether the seasonal states add to the forecast or multiply it; unused without them.
+    pub season: Form,
     /// The seasonal smoothing parameter `gamma`; unused without seasonal states.
     pub gamma: f64,
     /// The level.
     pub level: f64,
     /// The slope; unused without a trend.
     pub slope: f64,
-    /// The additive seasonal states, most recent first: `seasonal[m - 1]` belongs to the
-    /// next value. Empty for a model without a season; its length is the period `m`.
+    /// The seasonal states, most recent first: `seasonal[m - 1]` belongs to the next value.
+    /// Empty for a model without a season; its length is the period `m`.
     pub seasonal: &'a [f64],
     /// The innovation variance. Must be positive and finite.
     pub sigma2: f64,
@@ -112,8 +128,10 @@ impl Default for EtsSpec<'_> {
     /// Simple exponential smoothing at level 0 with `alpha = 0.5` and unit variance.
     fn default() -> Self {
         Self {
+            error: Form::Additive,
             alpha: 0.5,
             trend: Trend::None,
+            season: Form::Additive,
             gamma: 0.0,
             level: 0.0,
             slope: 0.0,
@@ -124,8 +142,8 @@ impl Default for EtsSpec<'_> {
 }
 
 impl EtsSpec<'_> {
-    /// Checks that every parameter and state is finite, and `alpha` and `sigma2` are
-    /// positive.
+    /// Checks that every parameter and state is finite, `alpha` and `sigma2` are positive,
+    /// and the model is one R allows: a multiplicative season needs a multiplicative error.
     fn validate(&self) -> Result<(), FilterError> {
         let values = [
             self.alpha,
@@ -137,8 +155,9 @@ impl EtsSpec<'_> {
             self.sigma2,
         ];
         let finite = values.iter().chain(self.seasonal).all(|v| v.is_finite());
+        let allowed = !(self.error == Form::Additive && self.multiplicative_season());
         // The slope update divides by `alpha`.
-        if !finite || self.sigma2 <= 0.0 || self.alpha <= 0.0 {
+        if !finite || self.sigma2 <= 0.0 || self.alpha <= 0.0 || !allowed {
             return Err(FilterError::InvalidParameter);
         }
 
@@ -153,7 +172,13 @@ impl EtsSpec<'_> {
             gamma: self.gamma,
             phi: self.trend.phi(),
             trend: !matches!(self.trend, Trend::None),
+            multiplicative_season: self.multiplicative_season(),
         }
+    }
+
+    /// Whether the model has seasonal states that multiply the forecast.
+    fn multiplicative_season(&self) -> bool {
+        self.season == Form::Multiplicative && !self.seasonal.is_empty()
     }
 }
 
@@ -176,6 +201,8 @@ impl EtsSpec<'_> {
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub struct EtsFilter<const M: usize> {
+    /// The error form.
+    error: Form,
     /// The smoothing parameters.
     smoothing: Smoothing,
     /// The innovation variance.
@@ -214,6 +241,7 @@ impl<const M: usize> EtsFilter<M> {
         let mut seasonal = [0.0; M];
         seasonal[..m].copy_from_slice(spec.seasonal);
         Ok(Self {
+            error: spec.error,
             smoothing: spec.smoothing(),
             sigma2: spec.sigma2,
             level: spec.level,
@@ -228,7 +256,8 @@ impl<const M: usize> EtsFilter<M> {
         })
     }
 
-    /// Feeds one value and returns its one-step forecast error and variance.
+    /// Feeds one value and returns its one-step forecast error `y - f` and the variance of
+    /// it: `sigma2`, or `sigma2 f^2` with a multiplicative error.
     ///
     /// A non-finite value counts as missing: its error is `NaN`, and the states move on as
     /// their forecast, as if the value had been forecast exactly.
@@ -242,7 +271,10 @@ impl<const M: usize> EtsFilter<M> {
             } else {
                 f64::NAN
             },
-            variance: self.sigma2,
+            variance: match self.error {
+                Form::Additive => self.sigma2,
+                Form::Multiplicative => self.sigma2 * forecast * forecast,
+            },
         };
         let observed = if y.is_finite() { y } else { forecast };
         let m = self.m;
@@ -265,14 +297,40 @@ impl<const M: usize> EtsFilter<M> {
 
     /// Forecasts the next `mean.len()` values and their prediction variances.
     ///
-    /// These are R's analytic forecasts for additive-error models (its class 1):
+    /// The variances are R's analytic ones. With an additive error (R's class 1) they are
     /// `sigma2 (1 + c_1^2 + ... + c_(h-1)^2)` with `c_j = alpha + beta phi_j + gamma` where
-    /// `j` is a multiple of `m`, and `phi_j = phi + ... + phi^j`.
+    /// `j` is a multiple of `m`, and `phi_j = phi + ... + phi^j`. With a multiplicative
+    /// error and no or an additive season (class 2) they follow from the same `c_j` and the
+    /// means. With a multiplicative season (class 3) they need working memory: this method
+    /// writes the point forecasts and `NaN` variances, and [`EtsFilter::forecast_with`]
+    /// computes the variances and R's means, the expectations of the future values.
     ///
     /// # Panics
     ///
     /// Panics if `mean` and `variance` have different lengths.
     pub fn forecast_into(&self, mean: &mut [f64], variance: &mut [f64]) {
+        self.forecast_with(&mut [], mean, variance);
+    }
+
+    /// The working memory [`EtsFilter::forecast_with`] needs for this model: 0, or for a
+    /// multiplicative season `7 q^2 + 3 q` values with `q = m` (`2 m` with a trend).
+    #[must_use]
+    pub const fn forecast_scratch_len(&self) -> usize {
+        if self.smoothing.multiplicative_season {
+            class3::scratch_len(self.smoothing.trend, self.m)
+        } else {
+            0
+        }
+    }
+
+    /// Like [`EtsFilter::forecast_into`], with `scratch` of at least
+    /// [`EtsFilter::forecast_scratch_len`] values for the variances of a multiplicative
+    /// season. With less, those variances are `NaN`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `mean` and `variance` have different lengths.
+    pub fn forecast_with(&self, scratch: &mut [f64], mean: &mut [f64], variance: &mut [f64]) {
         assert_eq!(
             mean.len(),
             variance.len(),
@@ -280,13 +338,49 @@ impl<const M: usize> EtsFilter<M> {
         );
         self.smoothing
             .forecast_means(self.level, self.slope, self.seasonal(), self.head, mean);
+        if self.smoothing.multiplicative_season {
+            self.class3_moments(scratch, mean, variance);
+            return;
+        }
+
         self.smoothing
             .forecast_variances(self.m, self.sigma2, variance);
+        if self.error == Form::Multiplicative {
+            self.smoothing
+                .relative_variances(self.m, self.sigma2, mean, variance);
+        }
+    }
+
+    /// R's class-3 means and variances, replacing the point forecasts in `mean` with the
+    /// expectations. If `scratch` is too short, the point forecasts stay and the variances
+    /// are `NaN`. The seasonal ring is unrolled into the end of `scratch` first.
+    fn class3_moments(&self, scratch: &mut [f64], mean: &mut [f64], variance: &mut [f64]) {
+        let needed = self.forecast_scratch_len() + self.m;
+        if scratch.len() < needed {
+            variance.fill(f64::NAN);
+            return;
+        }
+
+        let (work, ordered) = scratch[..needed].split_at_mut(needed - self.m);
+        for (j, value) in ordered.iter_mut().enumerate() {
+            *value = self.seasonal[(self.head + j) % self.m];
+        }
+        class3::moments(
+            &self.smoothing,
+            self.level,
+            self.slope,
+            ordered,
+            self.sigma2,
+            work,
+            mean,
+            variance,
+        );
     }
 
     /// Forecasts the next `mean.len()` values with central prediction intervals at `level`:
     /// `mean ± z sqrt(variance)` with `z = Φ⁻¹((1 + level) / 2)`, as R's `forecast.ets`.
-    /// `level` is a probability in `(0, 1)`; outside it the bounds are not finite.
+    /// `level` is a probability in `(0, 1)`; outside it the bounds are not finite. With a
+    /// multiplicative season the bounds are `NaN`; see [`EtsFilter::forecast_interval_with`].
     ///
     /// # Panics
     ///
@@ -298,13 +392,30 @@ impl<const M: usize> EtsFilter<M> {
         lower: &mut [f64],
         upper: &mut [f64],
     ) {
+        self.forecast_interval_with(&mut [], level, mean, lower, upper);
+    }
+
+    /// Like [`EtsFilter::forecast_interval_into`], with `scratch` as in
+    /// [`EtsFilter::forecast_with`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `mean`, `lower` and `upper` do not all have the same length.
+    pub fn forecast_interval_with(
+        &self,
+        scratch: &mut [f64],
+        level: f64,
+        mean: &mut [f64],
+        lower: &mut [f64],
+        upper: &mut [f64],
+    ) {
         assert!(
             mean.len() == lower.len() && mean.len() == upper.len(),
             "mean, lower and upper must have the same length"
         );
 
         // `upper` holds the variances until it is overwritten below.
-        self.forecast_into(mean, upper);
+        self.forecast_with(scratch, mean, upper);
         let z = normal_quantile(f64::midpoint(1.0, level));
         for ((m, lo), up) in mean.iter().zip(lower.iter_mut()).zip(upper.iter_mut()) {
             let half_width = z * math::sqrt(*up);
