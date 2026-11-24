@@ -42,10 +42,12 @@ fn exhaustive_search_is_at_least_as_good_as_stepwise() {
 
 #[test]
 fn chooses_the_generating_differencing_orders() {
-    // (case, d, D) where the generating model leaves no doubt.
+    // (case, d, D) where the generating model leaves no doubt. The I1 series is generated
+    // with d = 1, but R's `ndiffs` (KPSS with R's lag) picks d = 2 for it, and so does this
+    // crate; see `ndiffs_matches_r_on_the_pmdarima_series`.
     let expected = [
         ("WHITE", 0, 0),
-        ("I1", 1, 0),
+        ("I1", 2, 0),
         ("DRIFT", 1, 0),
         ("AIRLINE12", 1, 1),
     ];
@@ -67,12 +69,16 @@ fn chooses_the_generating_differencing_orders() {
 }
 
 #[test]
-fn ndiffs_matches_pmdarima() {
-    for (name, case) in crate::auto_data::NAMES.iter().zip(ALL) {
-        assert_eq!(
-            backshift::ndiffs(case.values, 0.05, 2),
-            case.ndiffs,
-            "{name}"
-        );
+fn ndiffs_matches_r_on_the_pmdarima_series() {
+    // `ndiffs` follows R's `forecast::ndiffs`, whose KPSS lag `trunc(3 sqrt(n) / 13)` differs
+    // from pmdarima's `trunc(4 (n / 100)^(1/4))`. On these series the two disagree twice
+    // (ARMA11 and I1); this crate agrees with R on all of them.
+    let r = crate::r_data::PMDARIMA_SERIES_NDIFFS;
+    let mut disagreements = 0;
+    for ((name, case), &expected) in crate::auto_data::NAMES.iter().zip(ALL).zip(r) {
+        assert_eq!(backshift::ndiffs(case.values, 0.05, 2), expected, "{name}");
+        disagreements += usize::from(case.ndiffs != expected);
     }
+
+    assert_eq!(disagreements, 2);
 }

@@ -1,0 +1,50 @@
+name: Conformance
+
+# Regenerates every reference set with the pinned reference tools and runs the integration
+# tests against the fresh vectors. The checked-in vectors already run in CI; this catches
+# drift in the tools or the generators. Regenerated floats may move in the last digit with
+# the machine's BLAS, which the tests' tolerances absorb.
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: statsmodels and coreforecast
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.11"
+          enable-cache: false
+      - run: uv venv --python 3.11 .venv
+      - run: uv pip install --python .venv -r scripts/requirements.txt
+      - run: .venv/bin/python -I scripts/generate_reference.py
+      - run: .venv/bin/python -I scripts/generate_streaming_reference.py
+      - run: git diff --stat
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
+        with:
+          toolchain: stable
+      - run: cargo test --test it
+
+  r:
+    name: R and forecast
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: docker build -t backshift-r-reference scripts/r
+      - run: docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rscript scripts/generate_r_reference.R
+      - run: git diff --stat
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
+        with:
+          toolchain: stable
+      - run: cargo test --test it

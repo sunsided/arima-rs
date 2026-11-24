@@ -1,5 +1,7 @@
 //! Integration tests for the public API.
 //!
+//! - [`r_conformance`] compares fits, forecasts, diagnostics, Fourier terms and the automatic
+//!   search against R 4.4 and `forecast`.
 //! - [`reference`] compares results against statsmodels reference vectors.
 //! - [`arma`] compares the ARMA filter and likelihood against statsmodels.
 //! - [`auto`] compares the stepwise auto-ARIMA search against pmdarima.
@@ -32,6 +34,8 @@ mod period;
 mod period_data;
 mod pmm2;
 mod properties;
+mod r_conformance;
+mod r_data;
 mod reference;
 mod reference_data;
 mod steady;
