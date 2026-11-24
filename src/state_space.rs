@@ -73,30 +73,47 @@ pub(crate) fn predict(
     let last = r - 1;
 
     // (T P T')_ij with T = [phi | shift]
-    //   = phi_i phi_j P00 + phi_i P0(j+1) + phi_j P0(i+1) + P(i+1)(j+1) + noise_ij,
-    // where every index past the last state contributes zero. Every term reads row 0
-    // or row i + 1 >= i, which this loop has not overwritten yet. The last row and column
-    // are split off so the inner loop has no branches.
+    //   = P(i+1)(j+1) + phi_i w_j + phi_j w_i + noise_ij,   w_j = P0(j+1) + phi_j P00 / 2,
+    // where every index past the last state contributes zero. The shift is a copy, and the
+    // other terms only touch the rows and columns of non-zero AR and MA coefficients, of
+    // which a seasonal model has few among its many states. Each term is added to both
+    // (i, j) and (j, i) in the same order, so P stays exactly symmetric without a mirror
+    // pass. Each row i reads row i + 1, which is not overwritten yet.
     for i in 0..last {
-        let (phi_i, next_i) = (sys.phi[i], row0[i + 1]);
-        let (sel_i, row, below) = (sys.sigma2 * sys.selection[i], i * stride, (i + 1) * stride);
-        for j in i..last {
-            let phi_j = sys.phi[j];
-            p[row + j] = phi_i * phi_j * p00
-                + phi_i * row0[j + 1]
-                + phi_j * next_i
-                + p[below + j + 1]
-                + sel_i * sys.selection[j];
-        }
+        let (head, tail) = p.split_at_mut((i + 1) * stride);
+        head[i * stride..i * stride + last].copy_from_slice(&tail[1..r]);
+        head[i * stride + last] = 0.0;
+    }
+    p[last * stride..last * stride + r].fill(0.0);
 
-        let phi_last = sys.phi[last];
-        p[row + last] = phi_i * phi_last * p00 + phi_last * next_i + sel_i * sys.selection[last];
+    // `w` in place of row 0: `w_j` reads `row0[j + 1]`, which is not overwritten yet.
+    let w = &mut row0[..r];
+    for j in 0..last {
+        w[j] = w[j + 1] + 0.5 * sys.phi[j] * p00;
+    }
+    w[last] = 0.5 * sys.phi[last] * p00;
+
+    // Row k and column k of the rank-2 term; the diagonal gets both halves.
+    for (k, &phi_k) in nonzero(sys.phi) {
+        for (value, &w_j) in p[k * stride..k * stride + r].iter_mut().zip(w.iter()) {
+            *value += phi_k * w_j;
+        }
+        for (i, &w_i) in w.iter().enumerate() {
+            p[i * stride + k] += phi_k * w_i;
+        }
     }
 
-    let phi_last = sys.phi[last];
-    p[last * stride + last] = phi_last * phi_last * p00 + sys.noise(last, last);
+    // `sel_i * sel_j` is commutative in floating point, so both triangles get the same value.
+    for (i, &sel_i) in nonzero(sys.selection) {
+        for (j, &sel_j) in nonzero(sys.selection) {
+            p[i * stride + j] += sys.sigma2 * (sel_i * sel_j);
+        }
+    }
+}
 
-    mirror_upper(p, r, stride);
+/// The indices and values of the non-zero entries of `values`.
+fn nonzero(values: &[f64]) -> impl Iterator<Item = (usize, &f64)> {
+    values.iter().enumerate().filter(|&(_, v)| *v != 0.0)
 }
 
 /// Multiplies the state vector by the transition matrix in place: `a = T a`.
@@ -198,7 +215,7 @@ impl SteadyState {
 
         let innovation = update(r, a, p, stride, y, buffers.scratch);
         predict(sys, a, p, stride, buffers.scratch);
-        if check && squared_change(p, buffers.previous, r, stride) < STEADY_STATE_TOLERANCE {
+        if check && changed_less_than(p, buffers.previous, r, stride, STEADY_STATE_TOLERANCE) {
             self.converged = true;
             self.first = true;
             buffers.gain[..r].copy_from_slice(&p[..r]);
@@ -228,15 +245,27 @@ fn copy_block(from: &[f64], to: &mut [f64], r: usize, stride: usize) {
     }
 }
 
-/// The sum of the squared differences of the top-left `r x r` blocks of `p` and `q`.
-fn squared_change(p: &[f64], q: &[f64], r: usize, stride: usize) -> f64 {
-    (0..r)
-        .flat_map(|i| (0..r).map(move |j| i * stride + j))
-        .map(|index| {
-            let difference = p[index] - q[index];
-            difference * difference
-        })
-        .sum()
+/// Whether the top-left `r x r` blocks of `p` and `q` differ by less than `tolerance` in
+/// their summed squared differences.
+///
+/// The partial sums never decrease, so it stops at the first one that reaches
+/// `tolerance`: before convergence that is usually the first entry, which saves the
+/// `r²` pass on every step. The decision is the one the full sum gives.
+fn changed_less_than(p: &[f64], q: &[f64], r: usize, stride: usize, tolerance: f64) -> bool {
+    let mut sum = 0.0;
+    for i in 0..r {
+        let row = i * stride..i * stride + r;
+        for (a, b) in p[row.clone()].iter().zip(&q[row]) {
+            let difference = a - b;
+            sum += difference * difference;
+        }
+
+        if sum >= tolerance {
+            return false;
+        }
+    }
+
+    sum < tolerance
 }
 
 /// Conditions the state on the observation `y` and returns its innovation.
@@ -262,15 +291,15 @@ pub(crate) fn update(
 
     // P Z' with Z = [1, 0, ...] is column 0, which equals row 0.
     gain[..r].copy_from_slice(&p[..r]);
-    for i in 0..r {
-        a[i] += gain[i] * value / variance;
-        // The update is symmetric, so compute the upper triangle and mirror it.
-        for j in i..r {
-            p[i * stride + j] -= gain[i] * gain[j] / variance;
+    for (i, &gain_i) in gain[..r].iter().enumerate() {
+        a[i] += gain_i * value / variance;
+        // `gain_i * gain_j` is commutative in floating point, so the full rows stay exactly
+        // symmetric; contiguous rows vectorise, a mirror pass would not.
+        let row = &mut p[i * stride..i * stride + r];
+        for (value, &gain_j) in row.iter_mut().zip(&gain[..r]) {
+            *value -= gain_i * gain_j / variance;
         }
     }
-
-    mirror_upper(p, r, stride);
 
     Innovation { value, variance }
 }
