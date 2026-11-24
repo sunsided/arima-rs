@@ -95,6 +95,9 @@ pub use crate::stl::{
 };
 pub use crate::theta::{ThetaFilter, ThetaSpec};
 pub use crate::time_series::{TimeSeries, TimeSeriesError};
+#[cfg(feature = "alloc")]
+pub use crate::trend::trend_regressors;
+pub use crate::trend::trend_row;
 pub use crate::var::{OnlineVar, VarSpec};
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
@@ -130,6 +133,7 @@ mod state_space;
 mod stl;
 mod theta;
 mod time_series;
+mod trend;
 mod var;
 #[cfg(kani)]
 mod verification;
