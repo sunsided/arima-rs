@@ -7,6 +7,8 @@
 //! time, and the table reports the fastest repeat: the one least disturbed by it.
 
 use anofox_forecast::models::Forecaster;
+mod ets;
+
 use backshift::{Arima, ArimaSpec, AutoArima, Method, Seasonal, loglike};
 use std::time::Instant;
 
@@ -106,6 +108,7 @@ fn main() {
         auto_report(case);
     }
 
+    ets::report();
     streaming();
 }
 
@@ -190,7 +193,7 @@ fn fit_anofox(case: &Case) -> Option<Estimate> {
 }
 
 /// A daily-stamped anofox series.
-fn anofox_series(values: &[f64]) -> anofox_forecast::core::TimeSeries {
+pub(crate) fn anofox_series(values: &[f64]) -> anofox_forecast::core::TimeSeries {
     let start = chrono::DateTime::from_timestamp(0, 0).expect("epoch");
     let stamps = (0..values.len())
         .map(|i| start + chrono::Duration::days(i as i64))
@@ -330,12 +333,12 @@ fn streaming() {
 }
 
 /// Seconds as milliseconds with two decimals.
-fn milliseconds(seconds: f64) -> String {
+pub(crate) fn milliseconds(seconds: f64) -> String {
     format!("{:.2} ms", seconds * 1e3)
 }
 
 /// Standard normal draws from a fixed linear congruential generator (Box–Muller).
-fn normals(n: usize, seed: u64) -> Vec<f64> {
+pub(crate) fn normals(n: usize, seed: u64) -> Vec<f64> {
     let mut state = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
     let mut uniform = move || {
         state = state

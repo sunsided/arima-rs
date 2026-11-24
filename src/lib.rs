@@ -65,11 +65,12 @@ pub use crate::diagnostics::{
 };
 #[cfg(feature = "alloc")]
 pub use crate::difference::{difference, integrate};
+pub use crate::ets::{EtsFilter, EtsSpec, Trend};
 pub use crate::filter::{ArimaSpec, Filter, FilterError, Seasonal};
 #[cfg(feature = "alloc")]
 pub use crate::fit::{
-    Arima, ArmaCoefficients, AutoArima, AutoFit, Criterion, Fitted, Fixed, FourierFit, MstlArima,
-    MstlForecast, Pmm2Fit, hannan_rissanen, nsdiffs,
+    Arima, ArmaCoefficients, AutoArima, AutoEts, AutoFit, Criterion, Ets, EtsFit, Fitted, Fixed,
+    FourierFit, MstlArima, MstlForecast, Pmm2Fit, hannan_rissanen, nsdiffs,
 };
 pub use crate::fit::{FitError, Method, Refit, RefitOptions, Refitter};
 #[cfg(feature = "alloc")]
@@ -100,6 +101,7 @@ mod conformal;
 mod diagnostics;
 #[cfg(feature = "alloc")]
 mod difference;
+mod ets;
 mod filter;
 mod fit;
 mod fourier;
