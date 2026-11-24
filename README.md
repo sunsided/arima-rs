@@ -5,8 +5,10 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/sunsided/arima-rs/ci.yml)](https://github.com/sunsided/arima-rs/actions/workflows/ci.yml)
 [![License](https://img.shields.io/crates/l/backshift)](#license)
 
-Seasonal ARIMA models for Rust, fitted by exact maximum likelihood, with a streaming filter that runs on targets without a heap.
-A model is fitted wherever there is an allocator (a laptop, a server, statsmodels if you prefer), and its coefficients are
+Time-series forecasting for Rust, checked against R and statsmodels, with streaming filters that run on targets without a
+heap. Seasonal ARIMA by exact maximum likelihood and auto-ARIMA, exponential smoothing (ETS), Theta, VAR, Croston and
+TSB for intermittent demand, GARCH volatility and changepoint detection, plus backtesting to choose between them.
+A model is fitted wherever there is an allocator (a laptop, a server, statsmodels if you prefer), and its parameters are
 all a microcontroller needs to filter new values and forecast them with prediction intervals. The name is the backshift
 operator `B` that ARIMA models are written in: `(1 - B)^d y_t` is the series differenced `d` times.
 
