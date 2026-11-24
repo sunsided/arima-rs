@@ -49,3 +49,31 @@ pub(crate) fn exp(x: f64) -> f64 {
 pub(crate) fn dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b).map(|(a, b)| a * b).sum()
 }
+
+/// Sine of `x` in radians.
+#[cfg(feature = "std")]
+#[inline]
+pub(crate) fn sin(x: f64) -> f64 {
+    x.sin()
+}
+
+/// Sine of `x` in radians.
+#[cfg(all(not(feature = "std"), feature = "libm"))]
+#[inline]
+pub(crate) fn sin(x: f64) -> f64 {
+    libm::sin(x)
+}
+
+/// Cosine of `x` in radians.
+#[cfg(feature = "std")]
+#[inline]
+pub(crate) fn cos(x: f64) -> f64 {
+    x.cos()
+}
+
+/// Cosine of `x` in radians.
+#[cfg(all(not(feature = "std"), feature = "libm"))]
+#[inline]
+pub(crate) fn cos(x: f64) -> f64 {
+    libm::cos(x)
+}

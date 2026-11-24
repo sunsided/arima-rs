@@ -86,6 +86,10 @@ fn main() {
         std::hint::black_box(steady.update(f64::from(t % 7) - 3.0));
     }
     steady.forecast_into(&mut mean, &mut variance);
+
+    let mut fourier = [0.0; 4];
+    backshift::fourier_row(365.25, 2, 1_000_000, &mut fourier).expect("valid terms");
+    std::hint::black_box(&fourier);
     let (mut lower, mut upper) = ([0.0; 6], [0.0; 6]);
     filter.forecast_interval_into(0.95, &mut mean, &mut lower, &mut upper);
 

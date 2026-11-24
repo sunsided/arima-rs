@@ -69,6 +69,9 @@ pub use crate::fit::{
 };
 pub use crate::fit::{FitError, Refit, RefitOptions, Refitter};
 #[cfg(feature = "alloc")]
+pub use crate::fourier::fourier;
+pub use crate::fourier::{FourierError, fourier_columns, fourier_row};
+#[cfg(feature = "alloc")]
 pub use crate::likelihood::{innovations, innovations_exog, loglike, loglike_exog};
 pub use crate::normal::normal_quantile;
 pub use crate::state_space::Innovation;
@@ -87,6 +90,7 @@ mod diagnostics;
 mod difference;
 mod filter;
 mod fit;
+mod fourier;
 mod likelihood;
 mod math;
 mod normal;
