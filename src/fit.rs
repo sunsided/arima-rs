@@ -1,7 +1,9 @@
 //! Maximum-likelihood fitting of ARIMA(p, d, q) models.
 //!
-//! [`Arima::fit`] differences the series, takes Hannan–Rissanen starting values, and
-//! maximises the exact Gaussian likelihood with BFGS. Parameters are optimised in
+//! [`Arima::fit`] differences the series, takes Hannan–Rissanen starting values,
+//! minimises the conditional sum of squares from there (R's default `CSS-ML`; skipped with
+//! missing values), and maximises the exact Gaussian likelihood with BFGS from the CSS
+//! optimum and its curvature. Parameters are optimised in
 //! an unconstrained space that maps onto stationary AR and invertible MA
 //! coefficients (statsmodels' transforms), and `sigma2` is concentrated out, so the
 //! optimiser only sees the AR, MA and mean parameters.
@@ -11,7 +13,8 @@
 //!     Y["y"] -->|"difference d times"| W["w"]
 //!     W -->|Hannan–Rissanen| S["start"]
 //!     S -->|unconstrain| U["u"]
-//!     U -->|"BFGS on -llf / n"| U2["u*"]
+//!     U -->|"BFGS on CSS"| C["u_css, H"]
+//!     C -->|"BFGS on -llf / n"| U2["u*"]
 //!     U2 -->|constrain| F["Fitted"]
 //! ```
 
@@ -398,8 +401,16 @@ impl Arima {
         let mut objective = Objective::new(self, &dy, &dx, columns, &pinned, &mut scratch);
         let mut bfgs_scratch = vec![0.0; bfgs::scratch_len(x.len())];
         let max_iterations = bfgs::Options::default().max_iterations;
-        let estimate =
-            objective::estimate(&mut objective, &mut x, &mut bfgs_scratch, max_iterations)?;
+        // A cold start on complete data warms up on the cheap CSS objective, as R's `CSS-ML`.
+        let mut css_scratch = (start.is_none() && !dy.iter().any(|v| v.is_nan()))
+            .then(|| vec![0.0; Objective::css_scratch_len(self, dy.len(), columns)]);
+        let estimate = objective::estimate(
+            &mut objective,
+            &mut x,
+            &mut bfgs_scratch,
+            max_iterations,
+            css_scratch.as_deref_mut(),
+        )?;
         let parameters = objective.parameters();
 
         Ok(Fitted {
@@ -560,7 +571,8 @@ pub struct Fitted {
     pub loglike: f64,
     /// The number of non-missing differenced values the likelihood covers.
     pub nobs: usize,
-    /// The optimiser iterations taken.
+    /// The optimiser iterations taken, those of the conditional-sum-of-squares warm-up
+    /// included.
     pub iterations: usize,
     /// Whether the optimiser met its tolerance rather than its iteration limit.
     pub converged: bool,

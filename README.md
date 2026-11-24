@@ -55,7 +55,7 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
 ## What's in it
 
 - `Arima::new(p, d, q).seasonal(P, D, Q, s).fit(y)`: exact Gaussian maximum likelihood with `sigma2` concentrated out, Hannan–Rissanen
-  starting values and an in-crate BFGS; AR and MA parts stay stationary and invertible through statsmodels' PACF
+  starting values refined by conditional sum of squares (R's `CSS-ML`) and an in-crate BFGS; AR and MA parts stay stationary and invertible through statsmodels' PACF
   transforms. `Fitted` reports the log-likelihood, AIC, AICc and BIC.
   `fit_from` starts the optimiser from a previous fit or a related model instead (R's `arima(init=)`), and `fit_fixed`
   keeps whole parts at given values (R's `arima(fixed=)`, statsmodels' `fix_params`).
