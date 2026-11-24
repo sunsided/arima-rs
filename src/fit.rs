@@ -20,6 +20,8 @@ mod auto;
 mod bfgs;
 #[cfg(feature = "alloc")]
 mod hannan_rissanen;
+#[cfg(feature = "alloc")]
+mod mstl;
 mod objective;
 mod refit;
 #[cfg(feature = "alloc")]
@@ -30,6 +32,8 @@ mod transform;
 pub use auto::{AutoArima, AutoFit, Criterion, FourierFit, nsdiffs};
 #[cfg(feature = "alloc")]
 pub use hannan_rissanen::{ArmaCoefficients, hannan_rissanen};
+#[cfg(feature = "alloc")]
+pub use mstl::{MstlArima, MstlForecast};
 pub use refit::{Refit, RefitOptions, Refitter};
 
 #[cfg(feature = "alloc")]
@@ -577,6 +581,9 @@ pub enum FitError {
     /// The start values of `Arima::fit_from` (feature `alloc`) have other orders,
     /// differencing, period or regressor count than the model.
     StartMismatch,
+    /// MSTL cannot decompose the series: no period is below half its length, a period is
+    /// below 2, or a value is not finite.
+    Decomposition,
 }
 
 impl From<FourierError> for FitError {
@@ -603,6 +610,7 @@ impl Display for FitError {
             }
             FitError::Fourier(error) => write!(f, "invalid Fourier terms: {error}"),
             FitError::StartMismatch => write!(f, "the start values do not match the model"),
+            FitError::Decomposition => write!(f, "MSTL cannot decompose the series"),
         }
     }
 }
