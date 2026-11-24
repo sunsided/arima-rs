@@ -157,6 +157,11 @@ impl SteadyState {
         previous_missing: None,
     };
 
+    /// Whether the covariance has converged and the gain is frozen.
+    pub(crate) const fn converged(&self) -> bool {
+        self.converged
+    }
+
     /// Conditions on `y` and moves forward one step, like [`update`] then [`predict`],
     /// but with the frozen variance and gain once the run has converged.
     pub(crate) fn step(

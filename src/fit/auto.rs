@@ -492,6 +492,7 @@ impl Search<'_> {
 
         if constant && self.try_model(null, false) {
             at = null;
+            constant = false;
         }
 
         while self.cache.len() < MAX_STEPWISE_MODELS {
@@ -787,7 +788,7 @@ pub fn nsdiffs(x: &[f64], period: usize, max_seasonal_d: usize) -> usize {
     let mut series = x.to_vec();
     for seasonal_d in 0..max_seasonal_d {
         let strength = stl(&series, period).map_or(0.0, |parts| parts.seasonal_strength());
-        if strength < SEASONAL_STRENGTH_THRESHOLD {
+        if strength <= SEASONAL_STRENGTH_THRESHOLD {
             return seasonal_d;
         }
 

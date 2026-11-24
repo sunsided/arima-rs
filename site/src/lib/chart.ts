@@ -302,7 +302,10 @@ function extent(values: number[]): [number, number] {
 		}
 	}
 	if (low > high) return [0, 1];
-	return low === high ? [low - 1, high + 1] : [low, high];
+	if (low !== high) return [low, high];
+	// Widen relative to the value too: at 1e17, `low - 1` is `low` again.
+	const pad = Math.max(1, Math.abs(low) * 1e-3);
+	return [low - pad, high + pad];
 }
 
 /** The extent widened by 5% on each side. */
@@ -324,7 +327,8 @@ export function niceTicks(low: number, high: number, count: number): number[] {
 	const power = 10 ** Math.floor(Math.log10(raw));
 	const step = [1, 2, 2.5, 5, 10].map((m) => m * power).find((s) => s >= raw) ?? 10 * power;
 	const ticks: number[] = [];
-	for (let t = Math.floor(low / step) * step; t <= high + step * 1e-9; t += step) {
+	// The bound stops the loop where `t += step` no longer moves `t` (large values, tiny span).
+	for (let t = Math.floor(low / step) * step; t <= high + step * 1e-9 && ticks.length <= 4 * count + 2; t += step) {
 		ticks.push(Math.round(t / step) * step);
 	}
 	return ticks;

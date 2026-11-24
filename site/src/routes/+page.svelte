@@ -22,6 +22,13 @@
 	});
 </script>
 
+{#snippet panelError(error: unknown, reset: () => void)}
+	<p class="error" role="alert">
+		This demo failed: {error instanceof Error ? error.message : String(error)}
+		<button type="button" onclick={reset}>Try again</button>
+	</p>
+{/snippet}
+
 <header>
 	<p class="eyebrow">backshift</p>
 	<h1>Fit anywhere, forecast on anything</h1>
@@ -42,10 +49,23 @@
 	{#if failure}
 		<p class="error" role="alert">Could not load the WebAssembly module: {failure}</p>
 	{:else if api}
-		<ForecastPanel />
-		<CalendarPanel {api} />
-		<StreamPanel {api} />
-		<DriftPanel {api} />
+		<!-- A panel whose wasm call throws shows its error instead of freezing. -->
+		<svelte:boundary>
+			<ForecastPanel />
+			{#snippet failed(error, reset)}{@render panelError(error, reset)}{/snippet}
+		</svelte:boundary>
+		<svelte:boundary>
+			<CalendarPanel {api} />
+			{#snippet failed(error, reset)}{@render panelError(error, reset)}{/snippet}
+		</svelte:boundary>
+		<svelte:boundary>
+			<StreamPanel {api} />
+			{#snippet failed(error, reset)}{@render panelError(error, reset)}{/snippet}
+		</svelte:boundary>
+		<svelte:boundary>
+			<DriftPanel {api} />
+			{#snippet failed(error, reset)}{@render panelError(error, reset)}{/snippet}
+		</svelte:boundary>
 	{:else}
 		<p class="loading">Loading the WebAssembly module…</p>
 	{/if}

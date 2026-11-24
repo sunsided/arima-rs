@@ -82,3 +82,32 @@ fn ndiffs_matches_r_on_the_pmdarima_series() {
 
     assert_eq!(disagreements, 2);
 }
+
+/// A random walk of `n` steps from an LCG seeded with `seed`.
+fn random_walk(seed: u32, n: usize) -> Vec<f64> {
+    let mut state = seed;
+    let mut level = 0.0;
+    (0..n)
+        .map(|_| {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            level += f64::from(state >> 8) / f64::from(1_u32 << 24) - 0.5;
+            level
+        })
+        .collect()
+}
+
+#[test]
+fn stepwise_drops_the_constant_with_the_null_model() {
+    // Once the null model without drift wins, R searches on without drift. With these
+    // small bounds that reaches every model, so stepwise must find the exhaustive best.
+    for seed in 0..40 {
+        let y = random_walk(seed, 150);
+        let search = AutoArima::new().d(1).max_orders(1, 1, 0, 0);
+        let stepwise = search.fit(&y).unwrap().fitted.aicc();
+        let exhaustive = search.exhaustive().fit(&y).unwrap().fitted.aicc();
+        assert!(
+            stepwise <= exhaustive + 1e-9,
+            "seed {seed}: stepwise {stepwise}, exhaustive {exhaustive}"
+        );
+    }
+}

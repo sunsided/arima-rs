@@ -62,7 +62,9 @@ impl Decomposition {
 /// derived from `period`, degree-1 LOESS throughout, and five non-robust inner passes.
 ///
 /// Matches statsmodels `STL(values, period=period).fit()`. Returns [`None`] unless
-/// `period >= 2` and `values` holds at least two full seasons of finite values.
+/// `period >= 2` and `values` holds at least two full seasons of finite values. A constant series decomposes exactly
+/// into its level as the trend, with zero seasonal and remainder parts; statsmodels leaves
+/// rounding noise there, which would read as seasonality.
 ///
 /// # Examples
 ///
@@ -85,7 +87,9 @@ pub fn stl(values: &[f64], period: usize) -> Option<Decomposition> {
 /// `STL(values, period=period, seasonal=seasonal_window).fit()`. A longer window gives a
 /// seasonal pattern that changes more slowly. Returns [`None`] unless `seasonal_window` is
 /// odd and at least 3, `period >= 2`, and `values` holds at least two full seasons of
-/// finite values.
+/// finite values. A constant series decomposes exactly
+/// into its level as the trend, with zero seasonal and remainder parts; statsmodels leaves
+/// rounding noise there, which would read as seasonality.
 ///
 /// # Examples
 ///
@@ -101,8 +105,17 @@ pub fn stl(values: &[f64], period: usize) -> Option<Decomposition> {
 pub fn stl_with(values: &[f64], period: usize, seasonal_window: usize) -> Option<Decomposition> {
     let n = values.len();
     let window_ok = seasonal_window >= 3 && seasonal_window % 2 == 1;
-    if !window_ok || period < 2 || n < 2 * period || !values.iter().all(|v| v.is_finite()) {
+    if !window_ok || period < 2 || n < 2 * period || !crate::math::all_finite(values) {
         return None;
+    }
+
+    if crate::math::is_constant(values) {
+        // The smoothers would leave rounding noise that reads as seasonality.
+        return Some(Decomposition {
+            seasonal: vec![0.0; n],
+            trend: values.to_vec(),
+            remainder: vec![0.0; n],
+        });
     }
 
     let windows = Windows::new(period, seasonal_window);
@@ -196,14 +209,17 @@ fn inner_pass(
 fn cycle_subseries(y: &[f64], period: usize, window: usize) -> Vec<f64> {
     let n = y.len();
     let mut out = vec![0.0; n + 2 * period];
+    let mut weights = Vec::new();
     for j in 0..period {
         let sub: Vec<f64> = y.iter().skip(j).step_by(period).copied().collect();
         let k = sub.len();
         let smooth = loess_smooth(&sub, window);
 
-        let before = loess_estimate(&sub, window, 0.0, 1, window.min(k)).unwrap_or(smooth[0]);
+        let before =
+            loess_estimate(&sub, window, 0.0, 1, window.min(k), &mut weights).unwrap_or(smooth[0]);
         let left = (k + 1).saturating_sub(window).max(1);
-        let after = loess_estimate(&sub, window, (k + 1) as f64, left, k).unwrap_or(smooth[k - 1]);
+        let after = loess_estimate(&sub, window, (k + 1) as f64, left, k, &mut weights)
+            .unwrap_or(smooth[k - 1]);
 
         out[j] = before;
         for (m, &value) in smooth.iter().enumerate() {
@@ -243,9 +259,10 @@ fn loess_smooth(y: &[f64], len: usize) -> Vec<f64> {
         return y.to_vec();
     }
 
+    let mut weights = Vec::new();
     if len >= n {
         return (1..=n)
-            .map(|i| loess_estimate(y, len, i as f64, 1, n).unwrap_or(y[i - 1]))
+            .map(|i| loess_estimate(y, len, i as f64, 1, n, &mut weights).unwrap_or(y[i - 1]))
             .collect();
     }
 
@@ -258,7 +275,7 @@ fn loess_smooth(y: &[f64], len: usize) -> Vec<f64> {
                 right += 1;
             }
 
-            loess_estimate(y, len, i as f64, left, right).unwrap_or(y[i - 1])
+            loess_estimate(y, len, i as f64, left, right, &mut weights).unwrap_or(y[i - 1])
         })
         .collect()
 }
@@ -267,7 +284,14 @@ fn loess_smooth(y: &[f64], len: usize) -> Vec<f64> {
 /// positions `left..=right`, with tricube weights over the window `len`.
 ///
 /// Returns [`None`] when every weight is zero, the Fortran's `ok = .false.`.
-fn loess_estimate(y: &[f64], len: usize, xs: f64, left: usize, right: usize) -> Option<f64> {
+fn loess_estimate(
+    y: &[f64],
+    len: usize,
+    xs: f64,
+    left: usize,
+    right: usize,
+    weights: &mut Vec<f64>,
+) -> Option<f64> {
     let n = y.len();
     let range = (right - left) as f64;
     let mut h = (xs - left as f64).max(right as f64 - xs);
@@ -276,7 +300,8 @@ fn loess_estimate(y: &[f64], len: usize, xs: f64, left: usize, right: usize) -> 
     }
 
     let (h9, h1) = (0.999 * h, 0.001 * h);
-    let mut weights = vec![0.0; right - left + 1];
+    weights.clear();
+    weights.resize(right - left + 1, 0.0);
     let mut total = 0.0;
     for (w, j) in weights.iter_mut().zip(left..=right) {
         let r = (j as f64 - xs).abs();
@@ -296,7 +321,7 @@ fn loess_estimate(y: &[f64], len: usize, xs: f64, left: usize, right: usize) -> 
         return None;
     }
 
-    for w in &mut weights {
+    for w in weights.iter_mut() {
         *w /= total;
     }
 
@@ -331,7 +356,7 @@ fn loess_estimate(y: &[f64], len: usize, xs: f64, left: usize, right: usize) -> 
 
 /// The population variance.
 fn variance(x: &[f64]) -> f64 {
-    let mean = x.iter().sum::<f64>() / x.len() as f64;
+    let mean = crate::math::mean(x);
     x.iter().map(|v| (v - mean) * (v - mean)).sum::<f64>() / x.len() as f64
 }
 
@@ -368,5 +393,12 @@ mod tests {
         let mut y = [1.0; 12];
         y[3] = f64::NAN;
         assert!(stl(&y, 4).is_none());
+    }
+
+    #[test]
+    fn constant_series_has_no_seasonality() {
+        let parts = stl(&[0.1; 48], 4).unwrap();
+        assert_eq!(parts.seasonal_strength(), 0.0);
+        assert!(parts.trend.iter().all(|&t| t == 0.1));
     }
 }

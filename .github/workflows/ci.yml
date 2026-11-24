@@ -49,6 +49,8 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.target }}
       - run: cargo build --lib --no-default-features --features libm --target ${{ matrix.target }}
+      # With an allocator, as a firmware that has one builds it.
+      - run: cargo build --lib --no-default-features --features libm,alloc --target ${{ matrix.target }}
 
   firmware:
     name: firmware link without allocator
@@ -83,6 +85,19 @@ jobs:
         working-directory: ci/wasi
         env:
           CARGO_TARGET_WASM32_WASIP1_RUNNER: wasmtime
+
+  compare:
+    name: competitor comparison builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
+        with:
+          toolchain: stable
+      # The README's benchmark numbers come from this crate; an API change must not break it.
+      - run: cargo check --manifest-path ci/compare/Cargo.toml
 
   msrv:
     name: msrv (1.85)

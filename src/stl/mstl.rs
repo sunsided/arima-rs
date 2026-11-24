@@ -72,7 +72,7 @@ pub fn mstl(values: &[f64], periods: &[usize], iterate: usize) -> Option<MultiDe
     let n = values.len();
     let mut kept: Vec<usize> = periods.iter().copied().filter(|&p| 2 * p < n).collect();
     kept.sort_unstable();
-    let finite = values.iter().all(|v| v.is_finite());
+    let finite = crate::math::all_finite(values);
     if !finite || kept.is_empty() || kept[0] < 2 || iterate == 0 {
         return None;
     }

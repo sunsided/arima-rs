@@ -6,7 +6,7 @@
 //! device can check its own residuals. Each matches the statsmodels function of the
 //! same name.
 
-use crate::math;
+use crate::math::{self, all_finite, is_constant, mean};
 use crate::special::chi_squared_survival;
 
 /// A test statistic with its p-value.
@@ -40,7 +40,12 @@ pub struct TestResult {
 #[must_use]
 pub fn ljung_box(residuals: &[f64], lags: usize, model_df: usize) -> Option<TestResult> {
     let n = residuals.len();
-    if lags == 0 || lags >= n || model_df >= lags || !all_finite(residuals) {
+    if lags == 0
+        || lags >= n
+        || model_df >= lags
+        || !all_finite(residuals)
+        || is_constant(residuals)
+    {
         return None;
     }
 
@@ -79,7 +84,7 @@ pub fn ljung_box(residuals: &[f64], lags: usize, model_df: usize) -> Option<Test
 #[must_use]
 pub fn jarque_bera(residuals: &[f64]) -> Option<TestResult> {
     let n = residuals.len();
-    if n < 2 || !all_finite(residuals) {
+    if n < 2 || !all_finite(residuals) || is_constant(residuals) {
         return None;
     }
 
@@ -131,7 +136,7 @@ pub enum KpssNull {
 #[must_use]
 pub fn kpss(x: &[f64], null: KpssNull, lags: usize) -> Option<TestResult> {
     let n = x.len();
-    if n < 3 || lags >= n || !all_finite(x) {
+    if n < 3 || lags >= n || !all_finite(x) || is_constant(x) {
         return None;
     }
 
@@ -306,16 +311,6 @@ fn interpolate_p_value(statistic: f64, critical: [f64; 4]) -> f64 {
     P[3]
 }
 
-/// The arithmetic mean.
-fn mean(x: &[f64]) -> f64 {
-    x.iter().sum::<f64>() / x.len() as f64
-}
-
-/// Whether every value is finite.
-fn all_finite(x: &[f64]) -> bool {
-    x.iter().all(|v| v.is_finite())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -436,5 +431,16 @@ mod tests {
         gappy[50] = f64::NAN;
         assert_eq!(ndiffs(&gappy, 0.05, 2), 1);
         assert_eq!(ndiffs(&[1.0, 2.0], 0.05, 2), 0);
+    }
+
+    #[test]
+    fn constant_series_with_an_inexact_mean() {
+        // The mean of `[0.1; 100]` is off by an ulp, which once read as variation.
+        let x = [0.1; 100];
+        assert_eq!(ljung_box(&x, 5, 0), None);
+        assert_eq!(jarque_bera(&x), None);
+        assert_eq!(kpss(&x, KpssNull::Level, 4), None);
+        #[cfg(feature = "alloc")]
+        assert_eq!(ndiffs(&x, 0.05, 2), 0);
     }
 }

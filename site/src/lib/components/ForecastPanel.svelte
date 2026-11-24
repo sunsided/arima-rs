@@ -44,8 +44,11 @@
 		next.onmessage = ({ data }: MessageEvent<FitResponse>) => {
 			// A cancelled request can still answer; only the latest one counts.
 			if (data.id !== latest) return;
-			if ('error' in data) error = data.error;
-			else {
+			// A failed fit must not leave the previous series' chart up as if it were this one.
+			if ('error' in data) {
+				error = data.error;
+				result = null;
+			} else {
 				result = data.result;
 				error = '';
 			}
@@ -70,6 +73,7 @@
 		const input = series();
 		if ('error' in input) {
 			error = input.error;
+			result = null;
 			return;
 		}
 

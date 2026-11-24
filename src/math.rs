@@ -91,3 +91,21 @@ pub(crate) fn exp_m1(x: f64) -> f64 {
 pub(crate) fn exp_m1(x: f64) -> f64 {
     libm::expm1(x)
 }
+
+/// The arithmetic mean; `NaN` for an empty slice.
+pub(crate) fn mean(x: &[f64]) -> f64 {
+    x.iter().sum::<f64>() / x.len() as f64
+}
+
+/// Whether every value is finite.
+pub(crate) fn all_finite(x: &[f64]) -> bool {
+    x.iter().all(|v| v.is_finite())
+}
+
+/// Whether every value equals the first, exactly.
+///
+/// Checked on the values themselves, because a mean such as that of `[0.1; 100]` is off by
+/// an ulp and leaves deviations of 1e-17 instead of zero.
+pub(crate) fn is_constant(x: &[f64]) -> bool {
+    x.iter().all(|v| *v == x[0])
+}
