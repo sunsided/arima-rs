@@ -77,3 +77,17 @@ pub(crate) fn cos(x: f64) -> f64 {
 pub(crate) fn cos(x: f64) -> f64 {
     libm::cos(x)
 }
+
+/// `e^x - 1`, accurate for `x` near 0.
+#[cfg(all(feature = "std", feature = "alloc"))]
+#[inline]
+pub(crate) fn exp_m1(x: f64) -> f64 {
+    x.exp_m1()
+}
+
+/// `e^x - 1`, accurate for `x` near 0.
+#[cfg(all(not(feature = "std"), feature = "libm", feature = "alloc"))]
+#[inline]
+pub(crate) fn exp_m1(x: f64) -> f64 {
+    libm::expm1(x)
+}
