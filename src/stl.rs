@@ -18,8 +18,14 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 mod mstl;
+mod period;
 
 pub use mstl::{MSTL_ITERATIONS, MultiDecomposition, mstl};
+pub use period::{PeriodCandidate, find_period};
+
+/// The seasonal strength above which a series counts as seasonal: the threshold of R's
+/// `nsdiffs` with its default seasonal-strength test, and of coreforecast.
+pub const SEASONAL_STRENGTH_THRESHOLD: f64 = 0.64;
 
 /// The components of an STL decomposition: `values = seasonal + trend + remainder`.
 #[derive(Debug, Clone, PartialEq)]
