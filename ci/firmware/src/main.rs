@@ -126,6 +126,15 @@ pub extern "C" fn _start() -> ! {
         garch.forecast_into(&mut variance);
         core::hint::black_box((innovation, variance));
     }
+    if let (Ok(mut cusum), Ok(mut bocpd)) = (
+        backshift::Cusum::new(0.5, 4.0),
+        backshift::Bocpd::<8>::new(0.01, backshift::NormalGamma::STANDARD),
+    ) {
+        let z = core::hint::black_box(0.7);
+        core::hint::black_box(cusum.update(z));
+        bocpd.update(z);
+        core::hint::black_box(bocpd.run_length());
+    }
 
     let mut window = [0.0; WINDOW];
     for (t, value) in window.iter_mut().enumerate() {

@@ -222,6 +222,16 @@ fn main() {
     garch.forecast_into(&mut garch_variance);
     std::hint::black_box((garch.update(f64::NAN), garch_variance));
 
+    let mut cusum = backshift::Cusum::new(0.5, 4.0).expect("valid parameters");
+    let mut bocpd = backshift::Bocpd::<16>::new(0.01, backshift::NormalGamma::STANDARD)
+        .expect("valid parameters");
+    for (t, &value) in demand.iter().enumerate() {
+        let z = value - 1.0 + f64::from(u32::try_from(t % 3).expect("small"));
+        std::hint::black_box(cusum.update(z));
+        bocpd.update(z);
+    }
+    std::hint::black_box((bocpd.run_length(), bocpd.probability_within(5)));
+
     let mut fourier = [0.0; 4];
     backshift::fourier_row(365.25, 2, 1_000_000, &mut fourier).expect("valid terms");
     std::hint::black_box(&fourier);

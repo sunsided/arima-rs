@@ -23,6 +23,8 @@
 //!   `accuracy` and `tsCV`, and checks the family selection.
 //! - [`garch`] compares GARCH(1,1) against R's `tseries::garch`, and its fit against the
 //!   likelihood's optimum.
+//! - [`changepoint`] checks CUSUM against its known average run lengths and BOCPD against
+//!   the exact posterior from every segmentation.
 //! - [`model_properties`] checks the filter, fits and search on random models and series.
 
 mod arma;
@@ -30,6 +32,7 @@ mod arma_data;
 mod auto;
 mod auto_data;
 mod backtest;
+mod changepoint;
 mod conformal;
 mod croston;
 mod ets;
