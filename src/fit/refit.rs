@@ -230,7 +230,7 @@ impl ArimaSpec<'_> {
     }
 
     /// The model this spec's orders describe, for the shared fitting core.
-    const fn refit_model(&self, options: RefitOptions) -> Arima {
+    pub(super) const fn refit_model(&self, options: RefitOptions) -> Arima {
         Arima {
             p: self.ar.len(),
             d: self.d,
@@ -244,7 +244,7 @@ impl ArimaSpec<'_> {
     }
 
     /// The longest of the AR, MA, seasonal AR and seasonal MA parts.
-    const fn largest_part(&self) -> usize {
+    pub(super) const fn largest_part(&self) -> usize {
         let parts = [
             self.ar.len(),
             self.ma.len(),
@@ -266,7 +266,7 @@ impl ArimaSpec<'_> {
 
     /// Writes the unconstrained warm start `[ar..., ma..., seasonal ar..., seasonal ma...,
     /// mean, beta...]` into `x`, with `work` as scratch of `3 largest_part()` values.
-    fn start_into(&self, options: RefitOptions, x: &mut [f64], work: &mut [f64]) {
+    pub(super) fn start_into(&self, options: RefitOptions, x: &mut [f64], work: &mut [f64]) {
         let parts = [
             (self.ar, true),
             (self.ma, false),
