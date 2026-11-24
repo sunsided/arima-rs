@@ -421,7 +421,8 @@ A family is worth adding only where backshift can bring the same edge it has for
 | **Streaming changepoint detection** (CUSUM, BOCPD on the innovations) | **Later, if asked** | Fits the device story with the innovations the filters already produce. anofox has batch detection only. |
 | **TBATS** | **Skip** | Multiple and non-integer seasonality is covered by MSTL+ARIMA and by Fourier regressors with ARIMA errors, both already checked against statsmodels and R. TBATS is heavy, slow to fit, and has no exact-likelihood reference to match. Benchmark the existing recipes against it instead. |
 | **Prophet-style** (piecewise trend, Fourier, holidays) | **Recipe, not a model** | Regression with ARIMA errors plus Fourier terms and holiday dummies already is this (see `examples/holidays_outages.rs`). At most a small helper for trend-changepoint regressors. |
-| **VAR, hierarchical reconciliation, MFLES** | **Skip** | Multivariate or platform features outside a univariate forecasting crate; MFLES is anofox-specific with no external reference. |
+| **VAR, VARX, online VAR** (lag order by AIC, BIC or HQ) | **Add, after ETS** | Least squares checked against statsmodels `VAR` and R `vars`. A heap-free `OnlineVar<K, P>` streams `K` sensors jointly and flags anomalies only their co-movement shows; neither friend streams a multivariate model, let alone on bare metal. VARX reuses the regressor handling of `fit_exog`. |
+| **Hierarchical reconciliation (bottom-up, OLS, WLS, MinT), MFLES** | **Skip** | Reconciliation is a platform feature across many series, outside a forecasting crate; MFLES is anofox-specific with no external reference. ETS covers the ground MFLES would. |
 
 ### Shape of the code
 
@@ -441,10 +442,13 @@ what that loop calls (fit, forecast), nothing speculative.
 1. **ETS**, in two pull requests: the additive-error models (linear, the bulk of real use) with `AutoEts` and the
    streaming filter; then multiplicative errors and seasonality. Conformance against R `forecast::ets` (likelihood,
    parameters, forecasts, intervals) and statsmodels `ETSModel`. Benchmark against foresight's and anofox's ETS.
-2. **Theta** on top of ETS, checked against R `thetaf` and statsmodels `ThetaModel`.
-3. **Croston, SBA, TSB**, checked against statsforecast.
-4. **Backtesting and cross-family selection.**
-5. GARCH and changepoints only on demand.
+2. **Theta** on top of ETS, checked against R `thetaf` and statsmodels `ThetaModel`. (Simple exponential smoothing,
+   Holt and Holt–Winters are ETS(A,N,N), (A,A,N) and (A,A,A), so they arrive with step 1.)
+3. **VAR, VARX and a heap-free online VAR** with automatic lag selection, checked against statsmodels `VAR` and
+   R `vars`.
+4. **Croston, SBA, TSB**, checked against statsforecast.
+5. **Backtesting and cross-family selection.**
+6. **GARCH, streaming changepoint detection and the Prophet-style recipe.**
 
 Each step is done when its conformance suite passes, its filter passes the no-allocation test and the firmware link,
 and `ci/compare` shows where it stands against both friends, in speed and in how close each gets to the reference.
