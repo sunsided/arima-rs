@@ -69,6 +69,11 @@ impl Model {
     /// model is regression with ARIMA errors, as R's `arima(xreg=)`: the ARIMA part models
     /// `y - x . beta`, with `beta` estimated jointly.
     ///
+    /// `approximate` fits by conditional sum of squares only (R's `method = "CSS"`): several
+    /// times faster, slightly short of the exact optimum (more on short, strongly seasonal
+    /// series). The likelihood, AIC and BIC it reports are still the exact ones at its
+    /// estimates. With missing values it fits exactly.
+    ///
     /// # Errors
     ///
     /// When the input is too long, an order is out of range, a seasonal part has no
@@ -90,6 +95,7 @@ impl Model {
         mean: Option<bool>,
         regressors: Option<Vec<f64>>,
         columns: Option<usize>,
+        approximate: Option<bool>,
     ) -> Result<Model, JsError> {
         check_values(values)?;
         let (regressors, columns) = regressor_matrix(regressors, columns, values.len())?;
@@ -113,6 +119,7 @@ impl Model {
             Some(include) => model.mean(include),
             None => model,
         };
+        let model = model.method(method(approximate));
         let fitted = model
             .fit_exog(values, &regressors, columns)
             .map_err(error)?;
@@ -124,6 +131,11 @@ impl Model {
     /// is the season length, or 0 (or 1) for a non-seasonal search. `regressors` and
     /// `columns` as in [`Model::fit`].
     ///
+    /// `approximate` ranks the candidates by conditional-sum-of-squares fits and refits only
+    /// the chosen order exactly (R's `approximation = TRUE`): much faster on seasonal
+    /// series, and the returned model is an exact fit. Where candidates are close it can
+    /// choose a different, equally good order.
+    ///
     /// # Errors
     ///
     /// When the input is too long, the period is out of range, the regressors do not hold
@@ -134,6 +146,7 @@ impl Model {
         period: usize,
         regressors: Option<Vec<f64>>,
         columns: Option<usize>,
+        approximate: Option<bool>,
     ) -> Result<Model, JsError> {
         check_values(values)?;
         let (regressors, columns) = regressor_matrix(regressors, columns, values.len())?;
@@ -165,6 +178,7 @@ impl Model {
             AutoArima::new()
         };
         let best = search
+            .approximation(approximate.unwrap_or(false))
             .fit_exog(values, &regressors, columns)
             .map_err(error)?;
 
@@ -607,6 +621,15 @@ pub fn ljung_box(residuals: &[f64], lags: usize, model_df: usize) -> Option<Vec<
 #[must_use]
 pub fn filter_capacity() -> usize {
     CAPACITY
+}
+
+/// The estimation method for an optional `approximate` flag; exact unless it is `true`.
+fn method(approximate: Option<bool>) -> backshift::Method {
+    if approximate.unwrap_or(false) {
+        backshift::Method::Css
+    } else {
+        backshift::Method::Exact
+    }
 }
 
 /// Rejects series longer than [`MAX_VALUES`].

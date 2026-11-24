@@ -22,6 +22,12 @@ assert.ok(Number.isFinite(auto.aicc) && auto.sigma2 > 0);
 
 const airline = Model.fit(y, 0, 1, 1, 0, 1, 1, 12);
 assert.equal(airline.label(), "ARIMA(0,1,1)(0,1,1)[12]");
+
+// Approximate fits report the exact likelihood at CSS estimates, so they never beat the exact fit.
+const quick = Model.fit(y, 0, 1, 1, 0, 1, 1, 12, undefined, undefined, undefined, true);
+assert.ok(quick.loglike <= airline.loglike + 1e-6 && quick.loglike > airline.loglike - 5);
+const quickAuto = Model.autoArima(y, 12, undefined, undefined, true);
+assert.match(quickAuto.label(), /^ARIMA\(/);
 assert.equal(airline.states, 27);
 const forecast = airline.forecast(y, 24, 0.95);
 const [mean, lower, upper] = [forecast.mean(), forecast.lower(), forecast.upper()];
