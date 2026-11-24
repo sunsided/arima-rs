@@ -132,7 +132,12 @@ fn is_nyquist(period: f64, k: usize) -> bool {
 ///
 /// # Errors
 ///
-/// [`FourierError::InvalidTerms`] if a pair of `terms` is invalid (see [`fourier_row`]).
+/// [`FourierError::InvalidTerms`] if `terms` is empty or a pair of it is invalid (see
+/// [`fourier_row`]).
+///
+/// # Panics
+///
+/// Panics if `rows` times the column count overflows `usize`, as an allocation that size would.
 ///
 /// # Examples
 ///
@@ -148,14 +153,21 @@ pub fn fourier(
     t0: u64,
     rows: usize,
 ) -> Result<alloc::vec::Vec<f64>, FourierError> {
+    if terms.is_empty() {
+        return Err(FourierError::InvalidTerms);
+    }
+
     let widths = terms
         .iter()
         .map(|&(period, k)| validate(period, k))
         .collect::<Result<alloc::vec::Vec<_>, _>>()?;
 
     let columns: usize = widths.iter().sum();
-    let mut out = alloc::vec![0.0; rows * columns];
-    for (row, t) in out.chunks_exact_mut(columns.max(1)).zip(t0..) {
+    let len = rows
+        .checked_mul(columns)
+        .expect("the regressor matrix fits in memory");
+    let mut out = alloc::vec![0.0; len];
+    for (row, t) in out.chunks_exact_mut(columns).zip(t0..) {
         let mut rest = row;
         for (&(period, k), &width) in terms.iter().zip(&widths) {
             let (part, tail) = rest.split_at_mut(width);
@@ -202,6 +214,12 @@ mod tests {
             fourier_row(7.0, 1, 0, &mut row),
             Err(FourierError::RowLength { needed: 2, got: 4 })
         );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn rejects_empty_terms() {
+        assert_eq!(fourier(&[], 0, 5), Err(FourierError::InvalidTerms));
     }
 
     #[test]
