@@ -114,13 +114,19 @@ fn fourier_search_rejects_bad_periods() {
 
 #[test]
 fn fourier_fit_matches_its_terms() {
-    // Whatever the search picks, refitting the returned terms gives the returned fit.
+    // One harmonic at period 9, searched up to 3 with a second period: the winner of the
+    // first period (K = 1) is not the last K scored, and the second period starts from it.
+    // Refitting the returned terms must give the returned fit.
     let y: Vec<f64> = (0..200)
         .map(|t| (std::f64::consts::TAU * f64::from(t) / 9.0).cos() + 0.3 * f64::from(t % 4))
         .collect();
     let search = AutoArima::new().max_orders(1, 1, 0, 0);
-    let best = search.fit_fourier(&y, &[(9.0, 2), (4.5, 2)]).unwrap();
+    let best = search.fit_fourier(&y, &[(9.0, 3), (4.5, 2)]).unwrap();
+    assert!(
+        best.terms[0].1 < 3,
+        "the case needs a winner before the last K"
+    );
     let x = fourier(&best.terms, 0, y.len()).unwrap();
     let again = search.fit_exog(&y, &x, best.fit.fitted.exog.len()).unwrap();
-    assert_eq!(again.fitted, best.fit.fitted);
+    assert_eq!(again, best.fit);
 }
