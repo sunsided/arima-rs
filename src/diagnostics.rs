@@ -192,9 +192,12 @@ pub fn kpss_short_lags(n: usize) -> usize {
 
 /// The number of differences that make `x` level-stationary by KPSS, at most `max_d`.
 ///
-/// Differences while [`kpss`] (level, with [`kpss_short_lags`]) rejects stationarity at
-/// `alpha`, the approach of R's `forecast::ndiffs` and pmdarima. Use it to pick `d` before
-/// fitting.
+/// Differences while [`kpss`] (level) rejects stationarity at `alpha`, as R's
+/// `forecast::ndiffs` does. Use it to pick `d` before fitting.
+///
+/// The KPSS lag is R's `trunc(3 sqrt(n) / 13)`, recomputed for each difference. pmdarima's
+/// `ndiffs` uses [`kpss_short_lags`] instead, and so can choose another `d`; this function
+/// matches R (checked against forecast 8.23).
 ///
 /// The KPSS table only covers `[0.01, 0.10]`, so `alpha` is clamped to that range, as R
 /// does, and a test rejects when its statistic exceeds the critical value at `alpha`
@@ -224,7 +227,7 @@ pub fn ndiffs(x: &[f64], alpha: f64, max_d: usize) -> usize {
     let mut series: alloc::vec::Vec<f64> = x.iter().copied().filter(|v| v.is_finite()).collect();
     let critical = critical_value(alpha, LEVEL_CRITICAL);
     for d in 0..max_d {
-        match kpss(&series, KpssNull::Level, kpss_short_lags(series.len())) {
+        match kpss(&series, KpssNull::Level, ndiffs_lags(series.len())) {
             Some(test) if test.statistic > critical => {
                 series = crate::difference(&series, 1);
             }
@@ -233,6 +236,13 @@ pub fn ndiffs(x: &[f64], alpha: f64, max_d: usize) -> usize {
     }
 
     max_d
+}
+
+/// The KPSS lag of R's `forecast::ndiffs`: `trunc(3 sqrt(n) / 13)`.
+#[cfg(feature = "alloc")]
+fn ndiffs_lags(n: usize) -> usize {
+    // `n` is far below 2^53, so the conversion is exact; the result truncates on purpose.
+    (3.0 * crate::math::sqrt(n as f64) / 13.0) as usize
 }
 
 /// The residual of `x` around the null hypothesis' fit, as a function of `t`.
