@@ -153,23 +153,32 @@ impl Ets {
             start::start_states(y, self.trend, self.period.max(1), self.season)
         };
 
-        let (u, minimum) = layout
-            .best_starts(y, &start)
-            .into_iter()
-            .map(|mut u| {
-                let mut scratch = vec![0.0; bfgs::scratch_len(u.len())];
-                let minimum = bfgs::minimize(
-                    |u| objective(&layout, y, u),
-                    &mut u,
-                    &mut scratch,
-                    bfgs::Options::default(),
-                );
-                (objective(&layout, y, &u), u, minimum)
-            })
-            .filter(|(value, ..)| value.is_finite())
-            .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map(|(_, u, minimum)| (u, minimum))
-            .ok_or(FitError::Degenerate)?;
+        let (u, minimum) = if layout.concentrated() && layout.smoothing_len() == 1 {
+            let u = layout.alpha_search(y).ok_or(FitError::Degenerate)?;
+            let minimum = bfgs::Minimum {
+                iterations: 0,
+                converged: true,
+            };
+            (u, minimum)
+        } else {
+            layout
+                .best_starts(y, &start)
+                .into_iter()
+                .map(|mut u| {
+                    let mut scratch = vec![0.0; bfgs::scratch_len(u.len())];
+                    let minimum = bfgs::minimize(
+                        |u| objective(&layout, y, u),
+                        &mut u,
+                        &mut scratch,
+                        bfgs::Options::default(),
+                    );
+                    (objective(&layout, y, &u), u, minimum)
+                })
+                .filter(|(value, ..)| value.is_finite())
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .map(|(_, u, minimum)| (u, minimum))
+                .ok_or(FitError::Degenerate)?
+        };
 
         let run = layout.run(y, &u).ok_or(FitError::Degenerate)?;
         if run.sse <= 0.0 || !run.sse.is_finite() {
@@ -272,7 +281,8 @@ pub struct EtsFit {
     pub nobs: usize,
     /// R's `np`: the smoothing parameters and the free initial states.
     pub parameters: usize,
-    /// The optimiser iterations taken.
+    /// The BFGS iterations taken; 0 for a model with `alpha` as its only free parameter,
+    /// which a line search fits instead.
     pub iterations: usize,
     /// Whether the optimiser met its tolerance rather than its iteration limit.
     pub converged: bool,

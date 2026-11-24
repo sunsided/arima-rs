@@ -11,7 +11,11 @@
 //! the size only when demand occurs, so its forecast decays through long gaps, as an item
 //! goes obsolete.
 
+mod grid;
+
 use crate::filter::FilterError;
+use crate::optimize;
+use grid::{LANES, Lanes};
 
 /// Which bias correction a [`CrostonFilter`] applies to Croston's ratio.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -118,7 +122,7 @@ impl CrostonFilter {
     /// warmed up on it, as the "optimised" Croston of foresight and statsforecast (with one
     /// `alpha` for sizes and intervals, as R).
     ///
-    /// `alpha` is searched in `[0.01, 1]` on a grid refined by golden-section search, without
+    /// `alpha` is searched in `[0.01, 1]` on a grid refined by Brent's method, without
     /// a heap.
     ///
     /// # Errors
@@ -139,7 +143,11 @@ impl CrostonFilter {
                 mean_squared_error(history, |y| filter.update(y))
             })
         };
-        let alpha = minimise(mse, ALPHA_RANGE);
+        let alpha = minimise(
+            |alphas| grid::croston(history, variant, alphas),
+            mse,
+            ALPHA_RANGE,
+        );
         let mut filter = Self::new(alpha, variant)?;
         filter.warm_up(history);
         Ok(filter)
@@ -272,7 +280,7 @@ impl TsbFilter {
     /// `history`, warmed up on it, without a heap.
     ///
     /// A coarse grid over both parameters picks a start; searches on each in turn (a grid
-    /// refined by golden section) improve it.
+    /// refined by Brent's method) improve it.
     ///
     /// # Errors
     ///
@@ -291,11 +299,10 @@ impl TsbFilter {
                 mean_squared_error(history, |y| filter.update(y))
             })
         };
-        let grid = [0.05, 0.1, 0.2, 0.4, 0.7, 1.0];
-        let (mut size, mut probability) = (grid[0], grid[0]);
+        let (mut size, mut probability) = (TSB_GRID[0], TSB_GRID[0]);
         let mut best = f64::INFINITY;
-        for &a in &grid {
-            for &b in &grid {
+        for &a in &TSB_GRID {
+            for &b in &TSB_GRID {
                 let value = mse(a, b);
                 if value < best {
                     (best, size, probability) = (value, a, b);
@@ -304,8 +311,16 @@ impl TsbFilter {
         }
 
         for _ in 0..COORDINATE_ROUNDS {
-            size = minimise(|a| mse(a, probability), ALPHA_RANGE);
-            probability = minimise(|b| mse(size, b), ALPHA_RANGE);
+            size = minimise(
+                |sizes| grid::tsb(history, sizes, &[probability; LANES]),
+                |a| mse(a, probability),
+                ALPHA_RANGE,
+            );
+            probability = minimise(
+                |probabilities| grid::tsb(history, &[size; LANES], probabilities),
+                |b| mse(size, b),
+                ALPHA_RANGE,
+            );
         }
 
         let mut filter = Self::new(size, probability)?;
@@ -334,6 +349,9 @@ impl TsbFilter {
 /// The range the optimised filters search their smoothing parameters in.
 const ALPHA_RANGE: (f64, f64) = (0.01, 1.0);
 
+/// The grid of both smoothing parameters that [`TsbFilter::optimised`] scores first.
+const TSB_GRID: [f64; 6] = [0.05, 0.1, 0.2, 0.4, 0.7, 1.0];
+
 /// How often [`TsbFilter::optimised`] alternates between its two parameters.
 const COORDINATE_ROUNDS: usize = 3;
 
@@ -356,50 +374,45 @@ fn mean_squared_error(history: &[f64], mut update: impl FnMut(f64) -> f64) -> f6
     }
 }
 
-/// How many evenly spaced points [`minimise`] scores before it refines the best one.
-const GRID_POINTS: u32 = 100;
+/// How many evenly spaced points [`minimise`] scores before it refines the best one; a
+/// multiple of [`LANES`].
+const GRID_POINTS: usize = 100;
 
-/// The minimiser of `f` on `[low, high]`: the best of [`GRID_POINTS`] evenly spaced points,
-/// refined by golden-section search within one grid step of it.
+/// The minimiser on `[low, high]` of the error `f`: the best of [`GRID_POINTS`] evenly
+/// spaced points, scored [`LANES`] at a time by `lanes`, refined by Brent's method within one
+/// grid step of it.
 ///
-/// The in-sample error of these methods is not unimodal in their parameters, so a
-/// golden-section search alone can stop in a poor local minimum; the grid finds the right
-/// basin first.
-fn minimise(f: impl Fn(f64) -> f64, (low, high): (f64, f64)) -> f64 {
-    let step = (high - low) / f64::from(GRID_POINTS - 1);
-    let best = (0..GRID_POINTS)
-        .map(|i| low + step * f64::from(i))
-        .map(|x| (f(x), x))
-        .min_by(|a, b| a.0.total_cmp(&b.0))
-        .map_or(low, |(_, x)| x);
-    golden_section(&f, ((best - step).max(low), (best + step).min(high)))
-}
-
-/// The minimiser of `f` on `[low, high]` by golden-section search, to `1e-6` of the range;
-/// for a unimodal `f` it is the global one. It returns the best point it evaluated.
-fn golden_section(f: impl Fn(f64) -> f64, (low, high): (f64, f64)) -> f64 {
-    // `(sqrt(5) - 1) / 2`, the fraction each step keeps.
-    const RATIO: f64 = 0.618_033_988_749_894_8;
-    let (mut lower, mut upper) = (low, high);
-    let mut left = upper - RATIO * (upper - lower);
-    let mut right = lower + RATIO * (upper - lower);
-    let (mut f_left, mut f_right) = (f(left), f(right));
-    while upper - lower > 1e-6 * (high - low).max(1e-12) {
-        if f_left <= f_right {
-            (upper, right, f_right) = (right, left, f_left);
-            left = upper - RATIO * (upper - lower);
-            f_left = f(left);
-        } else {
-            (lower, left, f_left) = (left, right, f_right);
-            right = lower + RATIO * (upper - lower);
-            f_right = f(right);
+/// The in-sample error of these methods is not unimodal in their parameters, so a local
+/// search alone can stop in a poor local minimum; the grid finds the right basin first.
+fn minimise(
+    lanes: impl Fn(&Lanes) -> Lanes,
+    f: impl Fn(f64) -> f64,
+    (low, high): (f64, f64),
+) -> f64 {
+    let step = (high - low) / grid_index(GRID_POINTS - 1);
+    let mut best = (f64::INFINITY, low);
+    for first in (0..GRID_POINTS).step_by(LANES) {
+        let points: Lanes = core::array::from_fn(|j| low + step * grid_index(first + j));
+        for (&value, &x) in lanes(&points).iter().zip(&points) {
+            if value < best.0 {
+                best = (value, x);
+            }
         }
     }
 
-    [low, high, left, right]
-        .into_iter()
-        .min_by(|a, b| f(*a).total_cmp(&f(*b)))
-        .unwrap_or(left)
+    let (f_best, x_best) = best;
+    let bracket = ((x_best - step).max(low), (x_best + step).min(high));
+    let (x, fx) = optimize::brent(&f, bracket, 1e-8);
+    if fx < f_best { x } else { x_best }
+}
+
+/// A grid index as a float; exact, since the grid has [`GRID_POINTS`] points.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "grid indices stay below GRID_POINTS = 100, where the conversion is exact"
+)]
+const fn grid_index(index: usize) -> f64 {
+    index as f64
 }
 
 #[cfg(test)]

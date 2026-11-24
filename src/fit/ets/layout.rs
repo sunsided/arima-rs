@@ -12,6 +12,7 @@ use super::super::roots::roots_inside;
 use super::Ets;
 use crate::ets::{Form, Smoothing, unroll};
 use crate::math;
+use crate::optimize::brent;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -44,6 +45,11 @@ const PHI_GRID: [f64; 2] = [0.5, 0.99];
 /// How many of the best grid points the fit refines with BFGS when the initial states are
 /// concentrated out.
 const REFINED: usize = 2;
+
+/// How far beyond the first or last point of [`ALPHA_GRID`] [`Layout::alpha_search`]
+/// searches, in logit units: far enough that `alpha` reaches R's bounds to within 1e-8 of
+/// its range, where random walks put the optimum.
+const EDGE: f64 = 20.0;
 
 /// How many it refines when the optimiser also carries the initial states, whose likelihood
 /// has more local optima (on the R suite's ETS(M,Ad,N) the third-best start ends 1.05 higher
@@ -110,6 +116,30 @@ impl Layout {
             REFINED_JOINT
         };
         scored.into_iter().take(refined).map(|(_, u)| u).collect()
+    }
+
+    /// The optimiser vector of a model whose only free parameter is `alpha` (no trend, no
+    /// season, the initial level concentrated out), or `None` if no grid point scores.
+    ///
+    /// A one-parameter likelihood needs no BFGS: the best point of [`ALPHA_GRID`] brackets
+    /// the optimum with its neighbours, and Brent's method finds it in a few evaluations.
+    pub(super) fn alpha_search(&self, y: &[f64]) -> Option<Vec<f64>> {
+        debug_assert!(self.concentrated() && self.smoothing_len() == 1);
+        let points = ALPHA_GRID.map(logit);
+        let scores = points.map(|u| objective(self, y, &[u]));
+        let (best, &score) = scores
+            .iter()
+            .enumerate()
+            .filter(|(_, value)| value.is_finite())
+            .min_by(|a, b| a.1.total_cmp(b.1))?;
+        let low = points
+            .get(best.wrapping_sub(1))
+            .copied()
+            .unwrap_or(points[0] - EDGE);
+        let high = points.get(best + 1).copied().unwrap_or(points[best] + EDGE);
+        let (u, value) = brent(|u| objective(self, y, &[u]), (low, high), 0.0);
+
+        Some(vec![if value < score { u } else { points[best] }])
     }
 
     /// Every grid point of [`ALPHA_GRID`] and the grids of the model's other parameters, as

@@ -125,6 +125,7 @@ mod linalg;
 mod math;
 mod normal;
 mod online;
+mod optimize;
 mod polynomial;
 mod seasonal_filter;
 mod special;
