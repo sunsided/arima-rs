@@ -66,6 +66,10 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
 - Regression with ARIMA errors: `fit_exog`, `update_exog`, `forecast_exog_into` and friends model `y_t - x_t . beta`
   with the regressors differenced along with `y`, as R's `arima(xreg=)` does. [`examples/holidays_outages.rs`](https://github.com/sunsided/arima-rs/blob/main/examples/holidays_outages.rs)
   fits daily users with bank-holiday and outage dummies, and forecasts through a known upcoming holiday.
+- Fourier regressors: `fourier_row` (heap-free, one row per new value on a device) and `fourier` (several periods
+  at once) give sine/cosine pairs in the column order of R's `forecast::fourier()`. With `fit_exog` and
+  `update_exog` they model long or non-integer seasons (365.25, 8766) as dynamic harmonic regression, which a
+  seasonal ARIMA cannot hold in memory.
 - `loglike` and `innovations` (and their `_exog` forms) for any model size, through the same recursion as the filter.
 - `AutoArima`: the stepwise search (or an exhaustive one, parallel with the `rayon` feature) with `ndiffs` and
   `nsdiffs` choosing `d` and `D`; AICc by default, AIC or BIC on request.
