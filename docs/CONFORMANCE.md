@@ -19,6 +19,7 @@ tolerance-based tests decide.
 | R 4.4.2, forecast 8.23 (Theta) | `scripts/generate_r_theta_reference.R` | `scripts/r/Dockerfile` | `r_theta_data.rs` | `thetaf`: forecasts and 80/95% intervals at R's state (1e-9); the seasonality test, multiplicative indices and drift (1e-9); fitted forecasts (5e-3, from the smoothing's optimum) |
 | R 4.4.2, forecast 8.23 (Croston) | `scripts/generate_r_croston_reference.R` | `scripts/r/Dockerfile` | `r_croston_data.rs` | `croston`: every fitted value (the forecast from the values before it) and the forecast (1e-12). SBA and SBJ are fixed factors on it; TSB has no R reference and is checked against a hand-computed example of its recursion, as statsforecast defines it |
 | R 4.4.2, forecast 8.23 (accuracy) | `scripts/generate_r_accuracy_reference.R` | `scripts/r/Dockerfile` | `r_accuracy_data.rs` | `accuracy`: ME, RMSE, MAE, MPE, MAPE and MASE (seasonal naive scale) of a forecast against its test set (1e-12); `tsCV`: every rolling-origin error of the naive forecast, with its `NaN` pattern (1e-12). `select_family` has no R counterpart and is checked against these measures |
+| R 4.4.2, tseries 0.10.58 (GARCH) | `scripts/generate_r_garch_reference.R` | `scripts/r/Dockerfile` | `r_garch_data.rs` | `garch(x, order = c(1, 1))`: the conditional standard deviation of every value at R's coefficients (1e-12) and R's log-likelihood rebuilt from the filter (1e-9); the fit reaches the likelihood's optimum, found by `optim` from several starts (log-likelihood within 1e-6, coefficients within 1e-3), and at least tseries' own fit |
 
 Run the generators from the repository root:
 
@@ -34,6 +35,7 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rsc
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rscript scripts/generate_r_theta_reference.R
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rscript scripts/generate_r_croston_reference.R
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rscript scripts/generate_r_accuracy_reference.R
+docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rscript scripts/generate_r_garch_reference.R
 
 cargo fmt
 ```
@@ -76,5 +78,11 @@ cargo fmt
   reference series reaches it.
 - **R's Theta intervals** are `sigma sqrt(1 + (h - 1) alpha^2)` on the deseasonalised scale; `thetaf`
   does not multiply them by the seasonal index as it does the means. The crate follows R.
+- **tseries' GARCH optimiser** often stops short of the maximum: on the reference series
+  `MODERATE` it returns `beta = 5.5e-15` with log-likelihood -1180.0, where the optimum is
+  -1168.8. The crate's fit is checked against the polished optimum, and against tseries'
+  likelihood function itself. tseries starts the variance of its likelihood at the mean
+  square of the series, but that of its fitted values at the long-run variance
+  `omega / (1 - alpha - beta)`; `GarchFit::variances` follows the likelihood.
 - **R's `fourier`** starts at `t = 1` and statsmodels' `Fourier` at `t = 0`; `fourier_row` takes
   the origin as an argument.

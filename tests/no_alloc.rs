@@ -210,6 +210,18 @@ fn main() {
     let tsb = backshift::TsbFilter::optimised(&demand).expect("two demands");
     std::hint::black_box((croston.forecast(), tsb.forecast()));
 
+    let garch_spec = backshift::GarchSpec {
+        omega: 0.1,
+        alpha: 0.1,
+        beta: 0.8,
+        variance: 1.0,
+    };
+    let mut garch = backshift::GarchFilter::new(&garch_spec).expect("valid model");
+    garch.warm_up(&demand);
+    let mut garch_variance = [0.0; 5];
+    garch.forecast_into(&mut garch_variance);
+    std::hint::black_box((garch.update(f64::NAN), garch_variance));
+
     let mut fourier = [0.0; 4];
     backshift::fourier_row(365.25, 2, 1_000_000, &mut fourier).expect("valid terms");
     std::hint::black_box(&fourier);

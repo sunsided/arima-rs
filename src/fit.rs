@@ -28,6 +28,8 @@ mod decompose;
 #[cfg(feature = "alloc")]
 mod ets;
 #[cfg(feature = "alloc")]
+mod garch;
+#[cfg(feature = "alloc")]
 mod hannan_rissanen;
 #[cfg(feature = "alloc")]
 mod mstl;
@@ -49,6 +51,8 @@ pub use auto::{AutoArima, AutoFit, Criterion, FourierFit, nsdiffs};
 pub use backtest::{Family, FamilySelection, cross_validation_errors, select_family};
 #[cfg(feature = "alloc")]
 pub use ets::{AutoEts, Ets, EtsFit};
+#[cfg(feature = "alloc")]
+pub use garch::{Garch, GarchFit};
 #[cfg(feature = "alloc")]
 pub use hannan_rissanen::{ArmaCoefficients, hannan_rissanen};
 #[cfg(feature = "alloc")]

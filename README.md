@@ -103,6 +103,10 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
   `croston` (every fitted value to 1e-12), with the SBA and SBJ bias corrections, and the method of Teunter, Syntetos
   and Babai, whose forecast decays through long gaps. Both are heap-free with `O(1)` work per value, including
   `optimised`, which picks the smoothing parameters that minimise the in-sample error.
+- `Garch` and `GarchFilter`: GARCH(1,1) conditional variance for returns, or for the innovations of any other model
+  here. The fit maximises `tseries::garch`'s likelihood and reaches its optimum where tseries' own optimiser stops
+  short; the heap-free filter tracks the variance at `O(1)` per value, treats a missing value as its expectation, and
+  forecasts the variance's decay to its long-run level.
 - `accuracy`, `cross_validation_errors` and `select_family`: R's `accuracy` measures (ME, RMSE, MAE, MPE, MAPE,
   MASE) and `tsCV` rolling-origin errors for any forecasting closure, both to 1e-12. `select_family` compares
   automatic ARIMA, automatic ETS, Theta, naive and seasonal naive by their mean MASE on the last few forecast origins,
