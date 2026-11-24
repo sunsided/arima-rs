@@ -220,7 +220,7 @@ Two consequences follow:
 - The state count is `max(p + P s, q + Q s + 1) + d + D s` (src/filter.rs:120). That is why the wasm binding caps `MAX_PERIOD = 366` and `MAX_STATES = 128` (bindings/wasm/src/lib.rs:37, :42). With Fourier terms the seasonality moves into regressors, so the states stay at `max(p, q + 1) + d`.
 - `Filter` needs capacity `max(states(), exog.len())` (src/filter.rs:128-132, :310-315).
 - A daily-plus-weekly-plus-yearly hourly model with K = (10, 5, 10) has 50 regressors and an ARMA(2,2) error. It fits in `Filter<50>`, where a seasonal ARIMA at s = 8766 cannot run at all.
-- The catch: one `R` sizes everything, including the covariance `p: [[f64; R]; R]` and `beta: [f64; R]` (src/filter.rs:260-287). `Filter<50>` therefore carries a 50×50 covariance (20 KB) plus six `[f64; 50]` arrays (2.4 KB), about 22 KB. The ARMA(2,2) error needs only a 3×3 block of it. A second const parameter for the regressor capacity would shrink this to well under 1 KB.
+- The catch: one `R` sizes everything, including the covariance `p: [[f64; R]; R]` and `beta: [f64; R]` (src/filter.rs:260-287). `Filter<50>` therefore carries a 50×50 covariance (20 KB) plus six `[f64; 50]` arrays (2.4 KB), about 22 KB. The ARMA(2,2) error needs only a 3×3 block of it. A second const parameter for the regressor capacity would shrink this to well under 1 KB. Done in #32: `Filter<3, 50>` takes 640 bytes.
 
 ### TBATS
 

@@ -86,7 +86,7 @@ fn main() {
         exog: &[1.5, -0.5],
         ..ArimaSpec::default()
     };
-    let mut exog_filter = Filter::<4>::new(&exog_spec).expect("stationary model");
+    let mut exog_filter = Filter::<4, 2>::new(&exog_spec).expect("stationary model");
     exog_filter.warm_up_exog(&history[..2], &[0.1, 0.2, 0.3, 0.4]);
     std::hint::black_box(exog_filter.update_exog(0.5, &[1.0, -1.0]));
     let (mut exog_mean, mut exog_variance) = ([0.0; 2], [0.0; 2]);
