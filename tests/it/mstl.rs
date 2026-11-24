@@ -58,7 +58,8 @@ fn two_seasons(n: usize) -> Vec<f64> {
 
 #[test]
 fn mstl_forecast_tracks_both_seasons() {
-    let (n, horizon) = (360, 30);
+    // 367 is a multiple of neither period, so the repeated cycles must keep their phase.
+    let (n, horizon) = (367, 30);
     let y = two_seasons(n + horizon);
     let model = AutoArima::new()
         .max_orders(2, 2, 0, 0)
