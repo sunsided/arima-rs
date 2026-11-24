@@ -163,8 +163,25 @@ backshift = { version = "0.3", default-features = false, features = ["libm"] }
 
 CI links a `no_std`/`no_main` binary for `thumbv7em-none-eabihf` that runs an ARIMA(1,1,1) filter, forecasts with
 intervals, refits the model, and streams through every other filter and detector, and a counting allocator asserts
-that the same device paths allocate nothing. With all of them linked the binary comes out at about 110 KB of `.text`;
-a firmware links only what it calls. The ARIMA filter's state lives inline:
+that the same device paths allocate nothing. A firmware pays only for the families it calls: the linker drops the
+rest, so the crate needs no feature per family. The `.text` each one adds on its own, with the model read at run time
+(as from flash), so the compiler cannot fold its branches away:
+
+| Linked | `opt-level = 3` | `opt-level = "s"` |
+|---|---|---|
+| ARIMA `Filter`, with forecasts and intervals | 31 KB | 23 KB |
+| ARIMA `Filter` and `ArimaSpec::refit` | 43 KB | 28 KB |
+| `EtsFilter`, with forecasts and intervals | 24 KB | 16 KB |
+| `ThetaFilter` | 11 KB | 10 KB |
+| `OnlineVar` | 14 KB | 13 KB |
+| `CrostonFilter` and `TsbFilter` | 4 KB | 5 KB |
+| the same, with `TsbFilter::optimised` | 23 KB | 13 KB |
+| `GarchFilter` | 3 KB | 3 KB |
+| `Cusum` and `Bocpd` | 15 KB | 13 KB |
+| all of the above | 111 KB | 61 KB |
+
+The families share the `libm` functions, so together they take less than the sum of their rows. The ARIMA
+filter's state lives inline:
 
 | Capacity (`M = 0` unless given) | `size_of::<Filter<R, M>>()` | Fits, for example |
 |---|---|---|

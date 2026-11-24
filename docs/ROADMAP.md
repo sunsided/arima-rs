@@ -442,6 +442,11 @@ uses only `Filter` carries no ETS or VAR code; the split that matters for runnin
 heap-free filters without `alloc` and fits behind it. Each feature would multiply the CI matrix. A family gets a
 feature only if it needs a dependency, as the parallel search does with `rayon`, or measurably slows a clean build.
 
+Measured with every family in (2026-11-24): a firmware that calls one family links 3 to 43 KB of `.text` for it
+(the README has the table), and nothing of the others; a clean release build of the whole library takes 1.5 s with
+`libm`, 2.7 s with `libm, alloc` and 1.9 s with `std`. Per-family features would save at most those seconds, and
+would break `default-features = false` users, exactly the embedded ones, unless they listed every family again.
+
 ### Order of work
 
 1. **ETS**, in two pull requests: the additive-error models (linear, the bulk of real use) with `AutoEts` and the
