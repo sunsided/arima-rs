@@ -100,6 +100,15 @@ fn main() {
     conformal.interval_into(0.9, &conformal_mean, &mut lower3, &mut upper3);
     std::hint::black_box((&lower3, &upper3));
 
+    let mut online = backshift::OnlineAr::<4>::new(backshift::OnlineArOptions::default())
+        .expect("default options are valid");
+    for t in 0..64 {
+        std::hint::black_box(online.update(f64::from(t % 9) / 9.0 - 0.5));
+    }
+    let mut online_forecast = [0.0; 3];
+    online.forecast_into(&mut online_forecast);
+    std::hint::black_box(&online_forecast);
+
     let mut fourier = [0.0; 4];
     backshift::fourier_row(365.25, 2, 1_000_000, &mut fourier).expect("valid terms");
     std::hint::black_box(&fourier);

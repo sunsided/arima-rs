@@ -10,6 +10,7 @@
 //! - [`mstl`] compares the MSTL decomposition against statsmodels.
 //! - [`period`] compares the seasonal period candidates against coreforecast.
 //! - [`steady`] compares the filter's steady-state mode against statsmodels.
+//! - [`online`] compares the online AR predictor with the exact filter under changing dynamics.
 //! - [`properties`] checks mathematical invariants on random series with proptest.
 
 mod arma;
@@ -22,6 +23,7 @@ mod fourier;
 mod fourier_data;
 mod mstl;
 mod mstl_data;
+mod online;
 mod period;
 mod period_data;
 mod properties;
