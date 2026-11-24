@@ -233,6 +233,7 @@ impl Arima {
     ///
     /// # Errors
     ///
+    /// [`FitError::RegressorShape`] for a malformed `regressors`, then
     /// [`FitError::StartMismatch`] if `start` has other orders than this model or not
     /// `columns` regression coefficients, otherwise as for [`Arima::fit_exog`].
     pub fn fit_exog_from(
@@ -242,6 +243,13 @@ impl Arima {
         columns: usize,
         start: &ArimaSpec<'_>,
     ) -> Result<Fitted, FitError> {
+        if regressors.len() != y.len() * columns {
+            return Err(FitError::RegressorShape {
+                expected: y.len() * columns,
+                got: regressors.len(),
+            });
+        }
+
         let options = RefitOptions {
             mean: self.mean,
             ..RefitOptions::default()
@@ -566,7 +574,7 @@ pub enum FitError {
     },
     /// The Fourier terms of a search are invalid.
     Fourier(FourierError),
-    /// The start values of [`Arima::fit_from`](crate::Arima::fit_from) have other orders,
+    /// The start values of `Arima::fit_from` (feature `alloc`) have other orders,
     /// differencing, period or regressor count than the model.
     StartMismatch,
 }
