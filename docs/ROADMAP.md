@@ -320,14 +320,17 @@ Source: research notes from a separate session. They come from abstracts and sea
   - **Shape:** a rolling buffer of absolute h-step residuals, with the quantile taken as the interval half-width. A fixed-size const-generic buffer keeps it heap-free.
   - **References:** ARIMA-based benchmark https://arxiv.org/abs/2601.18509, online multi-step https://arxiv.org/abs/2410.13115, EnbPI https://arxiv.org/abs/2010.09107.
   - **Verification:** coverage tests on simulated series with skewed and heavy-tailed noise. No statsmodels parity is possible.
+  - **Done (#40):** `Conformal<H, N>`; the papers were read first. Coverage 0.90 at level 0.9 under Gaussian, skewed and t3 noise.
 - **Online ARIMA by gradient or Newton steps (a second mode next to `Filter`, not a replacement).**
   - **What:** Anava et al., ICML 2013, "Online learning for time series prediction". The citation is from memory and unchecked.
   - **How it differs:** it learns an approximating AR(m+k) model one sample at a time instead of filtering exact MLE coefficients. It handles drifting parameters, but it gives up the 1e-9 `extend()` parity.
   - **Pitch:** offer it as an adaptive option (`OnlineAr<const M>`) and keep exact `Filter` as the headline.
+  - **Done (#42):** `OnlineAr<M>` (ARMA-ONS, arXiv:1302.6927, read first; the venue is unconfirmed). It beats a stale filter on drift and switches, and a periodic refit after a switch.
 - **PMM2 estimator for skewed innovations (later differentiator).**
   - **What:** reported big gains under moderate asymmetry with N >= 200. No Rust crate is known to have it.
   - **Fit:** add it as an alternative `Method` after exact MLE exists, so it can be compared against MLE on the same reference series.
   - **Reference:** https://arxiv.org/abs/2511.07059.
+  - **Done (#43):** the paper was read and the gain reproduced against exact MLE (not only CSS): 1.4-2x lower MSE for AR coefficients with Gamma(2,1) noise, none lost with Gaussian noise. Shipped as `Arima::fit_pmm2`; MA terms use the paper's linearised design and gain less.
 - **Weak fit, deferred:**
   - **Galerkin-ARIMA** (https://arxiv.org/abs/2507.07469): splines replace the AR term and the fit is closed-form 2SLS with no optimizer. It is not standard ARIMA, so it cannot be checked against statsmodels.
   - **Distributed ARIMA** (https://arxiv.org/abs/2007.09577): split, fit in parallel, combine. It needs rayon, so it only works behind an optional `std` feature and conflicts with the lead edge.

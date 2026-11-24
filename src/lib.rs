@@ -67,7 +67,7 @@ pub use crate::filter::{ArimaSpec, Filter, FilterError, Seasonal};
 #[cfg(feature = "alloc")]
 pub use crate::fit::{
     Arima, ArmaCoefficients, AutoArima, AutoFit, Criterion, Fitted, FourierFit, MstlArima,
-    MstlForecast, hannan_rissanen, nsdiffs,
+    MstlForecast, Pmm2Fit, hannan_rissanen, nsdiffs,
 };
 pub use crate::fit::{FitError, Refit, RefitOptions, Refitter};
 #[cfg(feature = "alloc")]

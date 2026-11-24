@@ -134,7 +134,7 @@ pub(crate) fn least_squares(rows: &[Vec<f64>], y: &[f64]) -> Option<Vec<f64>> {
 }
 
 /// Solves `A b = c` for symmetric positive definite `A`, given its lower triangle.
-fn cholesky_solve(mut a: Vec<Vec<f64>>, mut c: Vec<f64>) -> Option<Vec<f64>> {
+pub(super) fn cholesky_solve(mut a: Vec<Vec<f64>>, mut c: Vec<f64>) -> Option<Vec<f64>> {
     let k = c.len();
     for j in 0..k {
         let diagonal = a[j][j] - (0..j).map(|l| a[j][l] * a[j][l]).sum::<f64>();
