@@ -43,7 +43,8 @@ pub struct PeriodCandidate {
 /// and with a moderate `max_period` long periods such as 8766 on hourly data stay out of
 /// reach.
 ///
-/// Returns no candidate if a value is `NaN` or infinite, or fewer than 4 values are given.
+/// Returns no candidate if a value is `NaN` or infinite, or fewer than 4 values are given,
+/// and an empty list whenever no checked peak is seasonal enough: callers must handle it.
 ///
 /// # Examples
 ///
