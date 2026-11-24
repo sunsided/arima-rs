@@ -67,6 +67,9 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
 - `Conformal<H, N>`: heap-free conformal prediction intervals next to the filter's Gaussian ones. A rolling buffer of
   the last `N` absolute `h`-step errors per horizon gives the half-width, so the intervals hold their coverage under
   skewed or heavy-tailed noise without a change to the model (on one series this is empirical, not guaranteed).
+- `OnlineAr<M>`: an adaptive AR(`M`) predictor that learns its coefficients one value at a time (ARMA-ONS, Anava et
+  al. 2013), heap-free, for series whose dynamics drift or switch. It trades the filter's exact likelihood,
+  variances and statsmodels parity for adaptation without a refit.
 - Regression with ARIMA errors: `fit_exog`, `update_exog`, `forecast_exog_into` and friends model `y_t - x_t . beta`
   with the regressors differenced along with `y`, as R's `arima(xreg=)` does. [`examples/holidays_outages.rs`](https://github.com/sunsided/arima-rs/blob/main/examples/holidays_outages.rs)
   fits daily users with bank-holiday and outage dummies, and forecasts through a known upcoming holiday.
