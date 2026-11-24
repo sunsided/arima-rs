@@ -16,6 +16,7 @@ tolerance-based tests decide.
 | pmdarima | `scripts/generate_auto_reference.py` | its own environment (see the script) | `auto_data.rs` | the stepwise auto-ARIMA search with `d` and `D` fixed |
 | R 4.4.2, forecast 8.23 | `scripts/generate_r_reference.R` | `scripts/r/Dockerfile` | `r_data.rs` | `arima(method = "ML")` fits and `fixed =`, `predict` forecasts and standard errors (1e-6), `acf`, `pacf`, `Box.test` (1e-9), `fourier`, `ndiffs`, `nsdiffs`, `auto.arima` orders |
 | R 4.4.2, forecast 8.23 (ETS) | `scripts/generate_r_ets_reference.R` | `scripts/r/Dockerfile` | `r_ets_data.rs` | all 15 models of R's default set at R's parameters: residuals, states, forecasts and 80/95% intervals (1e-9; class 1, 2 and 3); fits reach R's likelihood or higher; `ets(y)` and `ets(y, additive.only = TRUE)` choose R's model or one that scores better |
+| R 4.4.2, forecast 8.23 (Theta) | `scripts/generate_r_theta_reference.R` | `scripts/r/Dockerfile` | `r_theta_data.rs` | `thetaf`: forecasts and 80/95% intervals at R's state (1e-9); the seasonality test, multiplicative indices and drift (1e-9); fitted forecasts (5e-3, from the smoothing's optimum) |
 
 Run the generators from the repository root:
 
@@ -28,6 +29,7 @@ uv venv --python 3.11 .venv && uv pip install --python .venv -r scripts/requirem
 docker build -t backshift-r-reference scripts/r
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rscript scripts/generate_r_reference.R
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rscript scripts/generate_r_ets_reference.R
+docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rscript scripts/generate_r_theta_reference.R
 
 cargo fmt
 ```
@@ -63,5 +65,7 @@ cargo fmt
   the full Gaussian log-likelihood, as for ARIMA. R estimates the initial states with the
   smoothing parameters by Nelder–Mead; the crate solves them by least squares at each step,
   which reaches the same or a higher likelihood on every reference model.
+- **R's Theta intervals** are `sigma sqrt(1 + (h - 1) alpha^2)` on the deseasonalised scale; `thetaf`
+  does not multiply them by the seasonal index as it does the means. The crate follows R.
 - **R's `fourier`** starts at `t = 1` and statsmodels' `Fourier` at `t = 0`; `fourier_row` takes
   the origin as an argument.

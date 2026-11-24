@@ -188,6 +188,22 @@ fn main() {
     online_var.forecast_interval_into(0.9, &mut v_mean, &mut v_lower, &mut v_upper);
     std::hint::black_box((&v_mean, &v_lower, &v_upper));
 
+    let theta_spec = backshift::ThetaSpec {
+        alpha: 0.4,
+        drift: 0.1,
+        level: 10.0,
+        count: 40,
+        sigma2: 1.0,
+        seasonal: &[1.1, 0.9, 1.05, 0.95],
+    };
+    let mut theta = backshift::ThetaFilter::<4>::new(&theta_spec).expect("valid model");
+    for t in 0..20 {
+        std::hint::black_box(theta.update(10.0 + f64::from(t % 4)));
+    }
+    let (mut t_mean, mut t_lower, mut t_upper) = ([0.0; 5], [0.0; 5], [0.0; 5]);
+    theta.forecast_interval_into(0.9, &mut t_mean, &mut t_lower, &mut t_upper);
+    std::hint::black_box((&t_mean, &t_lower, &t_upper));
+
     let mut fourier = [0.0; 4];
     backshift::fourier_row(365.25, 2, 1_000_000, &mut fourier).expect("valid terms");
     std::hint::black_box(&fourier);

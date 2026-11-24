@@ -3,9 +3,8 @@
 //! The crates parameterise their initial states differently, so a common likelihood is not
 //! available; the forecast error on the last `h` values, which no crate sees, is.
 
-use crate::{milliseconds, normals};
+use crate::{fastest, milliseconds, normals, rmse};
 use anofox_forecast::models::Forecaster;
-use std::time::Instant;
 
 /// One ETS benchmark series and the structure to fit to it.
 struct Case {
@@ -37,7 +36,7 @@ pub fn report() {
                 "| {} | {name} | {} | {} |",
                 case.name,
                 milliseconds(seconds),
-                rmse(forecast, &case.test)
+                score(forecast.as_deref(), &case.test)
             );
         }
     }
@@ -54,7 +53,7 @@ pub fn report() {
                 "| {} | {name} | {} | {label} | {} |",
                 case.name,
                 milliseconds(seconds),
-                rmse(forecast, &case.test)
+                score(forecast.as_deref(), &case.test)
             );
         }
     }
@@ -203,26 +202,7 @@ fn backshift_forecast(fit: &backshift::EtsFit, h: usize) -> Vec<f64> {
     mean
 }
 
-/// The fastest of `repeats` runs of `f`, with the last result.
-fn fastest<T>(repeats: usize, mut f: impl FnMut() -> T) -> (f64, T) {
-    let mut best = f64::INFINITY;
-    let mut result = f();
-    for _ in 0..repeats {
-        let start = Instant::now();
-        result = f();
-        best = best.min(start.elapsed().as_secs_f64());
-    }
-    (best, result)
-}
-
-/// The root mean squared error of `forecast` against `actual`, or "failed".
-fn rmse(forecast: Option<Vec<f64>>, actual: &[f64]) -> String {
-    forecast.map_or_else(
-        || "failed".to_string(),
-        |f| {
-            let n = f64::from(u32::try_from(actual.len()).expect("short horizon"));
-            let sse: f64 = f.iter().zip(actual).map(|(a, b)| (a - b) * (a - b)).sum();
-            format!("{:.3}", (sse / n).sqrt())
-        },
-    )
+/// The RMSE of a forecast that may have failed.
+fn score(forecast: Option<&[f64]>, actual: &[f64]) -> String {
+    forecast.map_or_else(|| "failed".to_string(), |f| rmse(f, actual))
 }

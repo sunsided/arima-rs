@@ -88,6 +88,21 @@ pub extern "C" fn _start() -> ! {
         core::hint::black_box((score, mean, variance));
     }
 
+    let theta_spec = backshift::ThetaSpec {
+        alpha: 0.4,
+        drift: 0.1,
+        level: 10.0,
+        count: 40,
+        sigma2: 1.0,
+        seasonal: &[],
+    };
+    if let Ok(mut theta) = backshift::ThetaFilter::<1>::new(&theta_spec) {
+        let innovation = theta.update(core::hint::black_box(10.5));
+        let (mut mean, mut variance) = ([0.0; 3], [0.0; 3]);
+        theta.forecast_into(&mut mean, &mut variance);
+        core::hint::black_box((innovation, mean, variance));
+    }
+
     let mut window = [0.0; WINDOW];
     for (t, value) in window.iter_mut().enumerate() {
         *value = core::hint::black_box(t as f64 * 0.5);

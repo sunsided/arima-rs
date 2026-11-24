@@ -6,6 +6,7 @@
 //! than three seasons. The level and slope come from a least-squares line through the first
 //! values of the seasonally adjusted series.
 
+use super::super::decompose::classical_figure;
 use super::super::hannan_rissanen::least_squares;
 use super::layout::count_as_f64;
 use crate::ets::Form;
@@ -67,55 +68,8 @@ fn seasonal_effects(y: &[f64], m: usize, season: Form) -> Vec<f64> {
         return line_residuals(y, m, season);
     }
 
-    let figure = decomposition_figure(y, m, season);
+    let figure = classical_figure(y, m, season);
     (0..y.len()).map(|t| figure[t % m]).collect()
-}
-
-/// `stats::decompose(y, type)$figure`: the mean detrended value of each position in the
-/// season, centred to sum to zero (additive) or to average one (multiplicative). The trend is
-/// a centred moving average of order `m` (`2 x m` for even `m`).
-fn decomposition_figure(y: &[f64], m: usize, season: Form) -> Vec<f64> {
-    let weights = moving_average_weights(m);
-    let half = weights.len() / 2;
-    let mut sums = vec![0.0; m];
-    let mut counts = vec![0_usize; m];
-    for t in half..y.len().saturating_sub(half) {
-        let trend: f64 = weights.iter().zip(&y[t - half..]).map(|(w, v)| w * v).sum();
-        sums[t % m] += match season {
-            Form::Additive => y[t] - trend,
-            Form::Multiplicative => y[t] / trend,
-        };
-        counts[t % m] += 1;
-    }
-
-    let mut figure: Vec<f64> = sums
-        .iter()
-        .zip(&counts)
-        .map(|(sum, &count)| sum / count_as_f64(count))
-        .collect();
-    let mean = figure.iter().sum::<f64>() / count_as_f64(m);
-    for value in &mut figure {
-        match season {
-            Form::Additive => *value -= mean,
-            Form::Multiplicative => *value /= mean,
-        }
-    }
-
-    figure
-}
-
-/// The filter of `stats::decompose`: `m` equal weights for odd `m`, and for even `m` `m + 1`
-/// weights with halves at both ends.
-fn moving_average_weights(m: usize) -> Vec<f64> {
-    let scale = 1.0 / count_as_f64(m);
-    if m % 2 == 1 {
-        return vec![scale; m];
-    }
-
-    let mut weights = vec![scale; m + 1];
-    weights[0] = scale / 2.0;
-    weights[m] = scale / 2.0;
-    weights
 }
 
 /// For fewer than three seasons: `y` against the line `a + b t` of
@@ -191,7 +145,7 @@ mod tests {
     fn decomposition_recovers_a_pure_pattern() {
         // A level of 10 with the pattern (3, -1, -2) repeating, which already sums to zero.
         let y: Vec<f64> = (0..12).map(|t| 10.0 + [3.0, -1.0, -2.0][t % 3]).collect();
-        let figure = decomposition_figure(&y, 3, Form::Additive);
+        let figure = classical_figure(&y, 3, Form::Additive);
         for (value, expected) in figure.iter().zip([3.0, -1.0, -2.0]) {
             assert!((value - expected).abs() < 1e-12, "{figure:?}");
         }
@@ -206,7 +160,7 @@ mod tests {
     fn multiplicative_decomposition_recovers_factors() {
         let factors = [1.2, 0.9, 0.9];
         let y: Vec<f64> = (0..12).map(|t| 50.0 * factors[t % 3]).collect();
-        let figure = decomposition_figure(&y, 3, Form::Multiplicative);
+        let figure = classical_figure(&y, 3, Form::Multiplicative);
         for (value, expected) in figure.iter().zip(factors) {
             assert!((value - expected).abs() < 1e-12, "{figure:?}");
         }

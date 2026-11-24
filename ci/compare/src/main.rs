@@ -8,6 +8,7 @@
 
 use anofox_forecast::models::Forecaster;
 mod ets;
+mod theta;
 mod var;
 
 use backshift::{Arima, ArimaSpec, AutoArima, Method, Seasonal, loglike};
@@ -111,6 +112,7 @@ fn main() {
 
     ets::report();
     var::report();
+    theta::report();
     streaming();
 }
 
@@ -394,4 +396,27 @@ fn airline(n: usize, seed: u64) -> Vec<f64> {
         y[t] = w + past(1) + past(12) - past(13);
     }
     y.iter().map(|v| v + 100.0).collect()
+}
+
+/// The fastest of `repeats` runs of `f`, in seconds, with the last result.
+pub(crate) fn fastest<T>(repeats: usize, mut f: impl FnMut() -> T) -> (f64, T) {
+    let mut best = f64::INFINITY;
+    let mut result = f();
+    for _ in 0..repeats {
+        let start = Instant::now();
+        result = f();
+        best = best.min(start.elapsed().as_secs_f64());
+    }
+    (best, result)
+}
+
+/// The root mean squared error of `forecast` against `actual`, to three decimals.
+pub(crate) fn rmse(forecast: &[f64], actual: &[f64]) -> String {
+    let n = f64::from(u32::try_from(actual.len()).expect("short horizon"));
+    let sse: f64 = forecast
+        .iter()
+        .zip(actual)
+        .map(|(a, b)| (a - b) * (a - b))
+        .sum();
+    format!("{:.3}", (sse / n).sqrt())
 }
