@@ -1,6 +1,6 @@
 [package]
 name = "backshift"
-version = "0.2.1"
+version = "0.3.0"
 description = "Time-series forecasting checked against R and statsmodels: ARIMA, ETS, Theta, VAR, Croston/TSB, GARCH and changepoint detection, with streaming filters that run without a heap"
 authors = ["Markus Mayer"]
 repository = "https://github.com/sunsided/arima-rs"
