@@ -5,8 +5,10 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/sunsided/arima-rs/ci.yml)](https://github.com/sunsided/arima-rs/actions/workflows/ci.yml)
 [![License](https://img.shields.io/crates/l/backshift)](#license)
 
-Seasonal ARIMA models for Rust, fitted by exact maximum likelihood, with a streaming filter that runs on targets without a heap.
-A model is fitted wherever there is an allocator (a laptop, a server, statsmodels if you prefer), and its coefficients are
+Time-series forecasting for Rust, checked against R and statsmodels, with streaming filters that run on targets without a
+heap. Seasonal ARIMA by exact maximum likelihood and auto-ARIMA, exponential smoothing (ETS), Theta, VAR, Croston and
+TSB for intermittent demand, GARCH volatility and changepoint detection, plus backtesting to choose between them.
+A model is fitted wherever there is an allocator (a laptop, a server, statsmodels if you prefer), and its parameters are
 all a microcontroller needs to filter new values and forecast them with prediction intervals. The name is the backshift
 operator `B` that ARIMA models are written in: `(1 - B)^d y_t` is the series differenced `d` times.
 
@@ -325,16 +327,16 @@ The other families, scored the same way (GARCH by the log-likelihood of each cra
 | Model | backshift | foresight | anofox-forecast |
 |---|---|---|---|
 | VAR(2), 3 series, n=500, fit and forecast | 0.04 ms, 1.218 | – | 0.09 ms, 1.218 |
-| Theta, trend, n=120 | 0.19 ms, 3.431 | 0.09 ms, 3.431 | 0.05 ms, 3.431 |
-| Theta, monthly season, n=144 | 0.21 ms, 1.801 | 0.11 ms, 1.801 | 0.06 ms, 1.801 |
-| SBA, optimised alpha, n=150 | 0.05 ms, 2.429 | 0.02 ms, 2.429 | 0.02 ms, 2.429 |
-| TSB, n=150 | 0.30 ms (optimised), 2.400 | < 0.01 ms, 2.366 | < 0.01 ms (fixed 0.1), 2.366 |
+| Theta, trend, n=120 | 0.07 ms, 3.431 | 0.10 ms, 3.431 | 0.05 ms, 3.431 |
+| Theta, monthly season, n=144 | 0.09 ms, 1.801 | 0.12 ms, 1.801 | 0.07 ms, 1.801 |
+| SBA, optimised alpha, n=150 | 0.02 ms, 2.429 | 0.02 ms, 2.429 | 0.02 ms, 2.429 |
+| TSB, n=150 | 0.10 ms (optimised), 2.400 | < 0.01 ms, 2.366 | < 0.01 ms (fixed 0.1), 2.366 |
 | GARCH(1,1), n=1000 | 3.1 ms, −1332.851 | – | 23.9 ms, −1332.851 |
 
-All crates agree on VAR, Theta, SBA and GARCH. backshift's Theta and Croston fits are a fraction of a millisecond
-slower than the others: it estimates Theta's smoothing by R's likelihood and searches Croston's parameters on a grid
-before refining them. Its optimised TSB fits the history better but forecasts this hold-out slightly worse than the
-fixed parameters of the other two.
+All crates agree on VAR, Theta, SBA and GARCH. backshift estimates Theta's smoothing by R's likelihood and searches
+Croston's and TSB's parameters on a 100-point grid before refining them, scoring 20 grid points per pass over the
+history; anofox-forecast's Theta remains slightly faster. backshift's optimised TSB fits the history better but
+forecasts this hold-out slightly worse than the fixed parameters of the other two.
 
 Reproduce with `cargo run --release --manifest-path ci/compare/Cargo.toml` (add `--features rayon` for the parallel
 seasonal search); `cargo bench` runs the in-crate Criterion benchmarks.

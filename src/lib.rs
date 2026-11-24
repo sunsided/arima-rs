@@ -1,7 +1,10 @@
-//! ARIMA modelling that also runs on devices without a heap.
+//! Time-series forecasting that also runs on devices without a heap: ARIMA, ETS, Theta, VAR,
+//! Croston and TSB, GARCH and changepoint detection, each with a streaming filter.
 //!
 //! Fit a model with `Arima::fit` (feature `alloc`), then stream new values through a [`Filter`],
-//! which lives inline with no allocation, and forecast with prediction intervals.
+//! which lives inline with no allocation, and forecast with prediction intervals. The other
+//! families follow the same split: a fit where there is an allocator, and a heap-free filter
+//! that continues from it.
 //! Likelihoods, innovations, forecasts and intervals match statsmodels to 1e-9.
 //!
 //! ```
@@ -125,6 +128,7 @@ mod linalg;
 mod math;
 mod normal;
 mod online;
+mod optimize;
 mod polynomial;
 mod seasonal_filter;
 mod special;

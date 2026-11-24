@@ -1,12 +1,14 @@
 [package]
 name = "backshift"
 version = "0.2.1"
-description = "ARIMA models fitted by exact maximum likelihood, with a streaming filter that runs without a heap"
+description = "Time-series forecasting checked against R and statsmodels: ARIMA, ETS, Theta, VAR, Croston/TSB, GARCH and changepoint detection, with streaming filters that run without a heap"
 authors = ["Markus Mayer"]
 repository = "https://github.com/sunsided/arima-rs"
+homepage = "https://sunsided.github.io/arima-rs/"
+documentation = "https://docs.rs/backshift"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
-keywords = ["arima", "time-series", "forecasting", "kalman-filter", "no-std"]
+keywords = ["forecasting", "time-series", "arima", "holt-winters", "no-std"]
 categories = ["mathematics", "science", "no-std", "no-std::no-alloc", "embedded"]
 edition = "2024"
 # `f64::abs` is in `core` (needed without `std`) since 1.85.
