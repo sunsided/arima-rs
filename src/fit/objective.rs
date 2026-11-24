@@ -288,7 +288,19 @@ pub(crate) fn estimate(
         ..bfgs::Options::default()
     };
 
-    // Without `alloc` only `Css::Off` exists, and nothing reads the scratch.
+    // `Css::Off` never reads the scratch, so the heap-free `refit` passes an empty one; a CSS
+    // mode must get the full size.
+    #[cfg(feature = "alloc")]
+    debug_assert!(
+        css == Css::Off
+            || css_scratch.len()
+                >= Objective::css_scratch_len(
+                    objective.model,
+                    objective.dy.len(),
+                    objective.columns
+                ),
+        "CSS scratch too small"
+    );
     #[cfg(not(feature = "alloc"))]
     let _ = css_scratch;
     let (iterations, converged) = match css {

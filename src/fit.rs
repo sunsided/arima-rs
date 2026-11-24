@@ -584,14 +584,14 @@ fn missing_if_infinite(values: &[f64]) -> Vec<f64> {
         .collect()
 }
 
-/// Whether observation `t` of the differenced data has a missing value; `dx` is
-/// column-major with `columns` columns.
 /// Whether any differenced value or regressor is missing.
 #[cfg(feature = "alloc")]
 fn residual_has_gaps(dy: &[f64], dx: &[f64], columns: usize) -> bool {
     (0..dy.len()).any(|t| residual_is_missing(dy, dx, columns, t))
 }
 
+/// Whether observation `t` of the differenced data has a missing value; `dx` is
+/// column-major with `columns` columns.
 #[cfg(feature = "alloc")]
 fn residual_is_missing(dy: &[f64], dx: &[f64], columns: usize, t: usize) -> bool {
     dy[t].is_nan() || (0..columns).any(|j| dx[j * dy.len() + t].is_nan())
