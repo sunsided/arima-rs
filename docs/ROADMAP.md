@@ -390,3 +390,61 @@ Re-check the chosen name right before `cargo publish`, because names can be clai
 - **R checks.** R `forecast::auto.arima` reference orders could not be generated locally, because neither R nor `pmdarima` is installed.
 - **Full `no_std` sweep.** A crates.io-wide sweep for `no_std` ARIMA crates was not possible beyond keyword searches. "Unique" means unique among the 13 ARIMA crates inspected plus the generic Kalman crates found by search.
 - **No other crate ran.** I did not run the other crates' test suites or benchmarks. Claims of "matches R" come from their test files and READMEs.
+
+## 7. Beyond ARIMA: which model families, in which order
+
+Written 2026-11-24, after the speed work in #67 and #68 put backshift first in its own lane. foresight and
+anofox-forecast cover more ground: foresight 0.7.3 ships ETS, Holt–Winters, Theta, TBATS, Croston, a Prophet-style
+model, ensembles and backtesting; anofox-forecast 0.21.0 adds GARCH, VAR, MFLES, intermittent-demand models, anomaly and
+changepoint detection and hierarchical reconciliation, and updates its exponential-smoothing models incrementally.
+
+### The bar a family has to clear
+
+A family is worth adding only where backshift can bring the same edge it has for ARIMA, not merely be present:
+
+1. **Exact and checked.** The likelihood or estimator of a reference implementation (R `forecast`, statsmodels, or
+   Nixtla's statsforecast), matched to stated tolerances in a conformance suite like the ARIMA one.
+2. **Streams heap-free.** A fitted model carries forward one value at a time in a `Copy` struct, as `Filter<R, M>`
+   does, so it runs on a device and feeds `Conformal` intervals. No competitor streams on bare metal.
+3. **Zero dependencies, `no_std`.** The offline fit may allocate; the device path may not.
+4. **Not already covered.** If an existing combination does the job, document the recipe instead of adding a model.
+
+### The families, ranked
+
+| Family | Verdict | Why |
+|---|---|---|
+| **ETS** (Hyndman et al. 2008: SES, Holt, damped, Holt–Winters, additive and multiplicative) | **Add first** | The most used family after ARIMA, and R's `ets` is the reference everyone compares with. Its innovations state-space form is a recursion over a few states with no Kalman covariance, so the device filter is smaller and faster than ARIMA's and fits the `Filter` shape directly. Both friends have it. |
+| **Theta** (Assimakopoulos & Nikolopoulos 2000; Hyndman & Billah 2003) | **Add, right after ETS** | SES with drift, so nearly free once ETS exists, and a strong M3/M4 benchmark. References: R `thetaf`, statsmodels `ThetaModel`. |
+| **Intermittent demand** (Croston, SBA, TSB) | **Add** | Tiny estimators with obvious device use (counts of rare events, spare-part demand). References: statsforecast `CrostonClassic`, `CrostonSBA`, `TSB`. Streaming is a two-state update. |
+| **Backtesting and cross-family selection** (rolling origin, MASE, sMAPE; ARIMA vs ETS vs Theta) | **Add, after ETS** | Information criteria do not compare across families (ETS and differenced ARIMA likelihoods are on different data), so choosing among them needs out-of-sample error, which is foresight's selling point. Infrastructure, not a model. |
+| **GARCH(1,1)**, alone or as ARIMA errors | **Later, if asked** | A different question (volatility), but a natural streaming companion: the innovation variance per step is what anomaly scoring wants. Reference: R `rugarch`, Python `arch`. |
+| **Streaming changepoint detection** (CUSUM, BOCPD on the innovations) | **Later, if asked** | Fits the device story with the innovations the filters already produce. anofox has batch detection only. |
+| **TBATS** | **Skip** | Multiple and non-integer seasonality is covered by MSTL+ARIMA and by Fourier regressors with ARIMA errors, both already checked against statsmodels and R. TBATS is heavy, slow to fit, and has no exact-likelihood reference to match. Benchmark the existing recipes against it instead. |
+| **Prophet-style** (piecewise trend, Fourier, holidays) | **Recipe, not a model** | Regression with ARIMA errors plus Fourier terms and holiday dummies already is this (see `examples/holidays_outages.rs`). At most a small helper for trend-changepoint regressors. |
+| **VAR, hierarchical reconciliation, MFLES** | **Skip** | Multivariate or platform features outside a univariate forecasting crate; MFLES is anofox-specific with no external reference. |
+
+### Shape of the code
+
+Each family follows the ARIMA layout, so the edge carries over without a framework:
+
+- a `…Spec` of coefficients (no allocation), validated like `ArimaSpec`;
+- a heap-free `…Filter` built from the spec, with `update`, `forecast_into` and `forecast_interval_into`;
+- an allocating fit (`Ets::new(…).fit(y)`, `AutoEts`) that reuses the in-crate BFGS, with bounded parameters mapped
+  through transforms as the ARIMA fit does;
+- a conformance generator in `scripts/` and data checked in under `tests/it/`.
+
+A shared trait appears only when backtesting needs to run several families through one loop, and then holds exactly
+what that loop calls (fit, forecast), nothing speculative.
+
+### Order of work
+
+1. **ETS**, in two pull requests: the additive-error models (linear, the bulk of real use) with `AutoEts` and the
+   streaming filter; then multiplicative errors and seasonality. Conformance against R `forecast::ets` (likelihood,
+   parameters, forecasts, intervals) and statsmodels `ETSModel`. Benchmark against foresight's and anofox's ETS.
+2. **Theta** on top of ETS, checked against R `thetaf` and statsmodels `ThetaModel`.
+3. **Croston, SBA, TSB**, checked against statsforecast.
+4. **Backtesting and cross-family selection.**
+5. GARCH and changepoints only on demand.
+
+Each step is done when its conformance suite passes, its filter passes the no-allocation test and the firmware link,
+and `ci/compare` shows where it stands against both friends, in speed and in how close each gets to the reference.
