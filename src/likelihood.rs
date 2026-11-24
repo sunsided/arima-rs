@@ -9,7 +9,7 @@ use crate::filter::{ArimaSpec, FilterError};
 use crate::math;
 #[cfg(feature = "alloc")]
 use crate::polynomial;
-use crate::state_space::{self, Innovation, LyapunovScratch, System};
+use crate::state_space::{self, Innovation, LyapunovScratch, SteadyBuffers, SteadyState, System};
 #[cfg(feature = "alloc")]
 use alloc::vec;
 #[cfg(feature = "alloc")]
@@ -225,10 +225,6 @@ pub(crate) fn differenced(y: &[f64], spec: &ArimaSpec<'_>) -> Vec<f64> {
         .collect()
 }
 
-/// statsmodels' default `ssm.tolerance`: the change in the innovation variance below
-/// which the filter counts as converged.
-const STEADY_STATE_TOLERANCE: f64 = 1e-19;
-
 /// The number of values a [`Workspace`] for `r` states borrows: five vectors of length
 /// `r` and four `r x r` matrices.
 pub(crate) const fn workspace_len(r: usize) -> usize {
@@ -252,6 +248,9 @@ struct Workspace<'b> {
     scratch: &'b mut [f64],
     /// The frozen gain of [`Workspace::run_steady`]. Length `r`.
     gain: &'b mut [f64],
+    /// Scratch for the covariance a steady-state step starts from, `r x r`. It is also
+    /// the first scratch matrix of the starting covariance.
+    previous: &'b mut [f64],
 }
 
 impl<'b> Workspace<'b> {
@@ -274,11 +273,12 @@ impl<'b> Workspace<'b> {
             p: take(&mut buffer, r * r),
             scratch: take(&mut buffer, r),
             gain: take(&mut buffer, r),
+            previous: take(&mut buffer, r * r),
         };
         spec.expand_arma_into(workspace.phi, workspace.selection);
 
         let scratch = LyapunovScratch {
-            power: take(&mut buffer, r * r),
+            power: workspace.previous,
             product: take(&mut buffer, r * r),
             term: buffer,
         };
@@ -317,13 +317,9 @@ impl<'b> Workspace<'b> {
         }
     }
 
-    /// Like [`Workspace::run`], but once the innovation variance stops changing (by less
-    /// than [`STEADY_STATE_TOLERANCE`]) the covariance and gain are frozen, and each further
-    /// step only moves the state: `O(r)` instead of `O(r^2)`.
+    /// Like [`Workspace::run`], with statsmodels' steady-state shortcut ([`SteadyState`]).
     ///
-    /// statsmodels takes the same shortcut by default; it moves results by about 1e-9, so
-    /// it is used for the fitting objective only. A missing value after convergence resumes
-    /// the full recursion from the frozen (still valid) covariance.
+    /// The shortcut moves results by about 1e-9, so it is used for the fitting objective only.
     fn run_steady(self, y: &[f64], mut sink: impl FnMut(Innovation)) {
         let Self {
             phi,
@@ -333,6 +329,7 @@ impl<'b> Workspace<'b> {
             p,
             scratch,
             gain,
+            previous,
         } = self;
         let r = phi.len();
         let system = System {
@@ -340,39 +337,14 @@ impl<'b> Workspace<'b> {
             selection,
             sigma2,
         };
-        let mut steady = false;
-        let mut previous = f64::NAN;
+        let mut steady = SteadyState::NEW;
         for &value in y {
-            if steady && !value.is_nan() {
-                let variance = p[0];
-                let innovation = value - a[0];
-                for (state, k) in a.iter_mut().zip(gain.iter()) {
-                    *state += k * innovation / variance;
-                }
-
-                state_space::transition_vector(system, a);
-                sink(Innovation {
-                    value: innovation,
-                    variance,
-                });
-                continue;
-            }
-
-            if steady {
-                // A missing value breaks the steady state; continue from the frozen covariance.
-                steady = false;
-                previous = f64::NAN;
-            }
-
-            sink(state_space::update(r, a, p, r, value, scratch));
-            state_space::predict(system, a, p, r, scratch);
-            if (p[0] - previous).abs() < STEADY_STATE_TOLERANCE {
-                steady = true;
-                // The steady-state update uses the predicted covariance's first column.
-                gain.copy_from_slice(&p[..r]);
-            }
-
-            previous = p[0];
+            let buffers = SteadyBuffers {
+                gain,
+                previous,
+                scratch,
+            };
+            sink(steady.step(system, a, p, r, value, buffers));
         }
     }
 }

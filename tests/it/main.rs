@@ -5,6 +5,7 @@
 //! - [`auto`] compares the stepwise auto-ARIMA search against pmdarima.
 //! - [`fit`] compares Hannan–Rissanen and maximum-likelihood fits against statsmodels.
 //! - [`stl`] compares the STL decomposition against statsmodels.
+//! - [`steady`] compares the filter's steady-state mode against statsmodels.
 //! - [`properties`] checks mathematical invariants on random series with proptest.
 
 mod arma;
@@ -15,5 +16,7 @@ mod fit;
 mod properties;
 mod reference;
 mod reference_data;
+mod steady;
+mod steady_data;
 mod stl;
 mod stl_data;
