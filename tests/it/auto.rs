@@ -1,7 +1,7 @@
 //! Checks the stepwise auto-ARIMA search against pmdarima's choices in [`crate::auto_data`].
 
 use crate::auto_data::ALL;
-use backshift::AutoArima;
+use backshift::{Arima, AutoArima};
 
 #[test]
 fn stepwise_search_matches_pmdarima() {
@@ -110,4 +110,43 @@ fn stepwise_drops_the_constant_with_the_null_model() {
             "seed {seed}: stepwise {stepwise}, exhaustive {exhaustive}"
         );
     }
+}
+
+#[test]
+fn approximation_picks_the_exact_choice_or_a_near_tie() {
+    // CSS ranks candidates almost like the exact likelihood; where it differs, the two
+    // choices must be within noise of each other. 7 of the 8 cases pick the same order.
+    for case in ALL {
+        let search = AutoArima::new().d(case.d).seasonal_d(case.seasonal_d);
+        let search = if case.period > 1 {
+            search.seasonal(case.period)
+        } else {
+            search
+        };
+        let exact = search.fit(case.values).unwrap();
+        let quick = search.approximation(true).fit(case.values).unwrap();
+        assert!(
+            quick.criterion <= exact.criterion + 0.1,
+            "approximate AICc {} vs exact {}",
+            quick.criterion,
+            exact.criterion
+        );
+    }
+}
+
+#[test]
+fn approximation_returns_an_exact_fit() {
+    let case = &ALL[0];
+    let quick = AutoArima::new()
+        .d(case.d)
+        .seasonal_d(case.seasonal_d)
+        .approximation(true)
+        .fit(case.values)
+        .unwrap()
+        .fitted;
+    let refit = Arima::new(quick.ar.len(), quick.d, quick.ma.len())
+        .mean(quick.with_mean)
+        .fit(case.values)
+        .unwrap();
+    assert!((quick.loglike - refit.loglike).abs() < 1e-9);
 }

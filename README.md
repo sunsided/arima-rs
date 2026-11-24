@@ -59,6 +59,8 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
   transforms. `Fitted` reports the log-likelihood, AIC, AICc and BIC.
   `fit_from` starts the optimiser from a previous fit or a related model instead (R's `arima(init=)`), and `fit_fixed`
   keeps whole parts at given values (R's `arima(fixed=)`, statsmodels' `fix_params`).
+  `.method(Method::Css)` stops at the conditional-sum-of-squares estimates (R's `method="CSS"`): 8.6× faster on the
+  airline model, 0.003 below its maximum log-likelihood, more on short strongly seasonal series.
   `fit_pmm2` refines a fit by PMM2 for skewed innovations; on simulated Gamma(2,1) innovations its AR estimates had
   1.4–2× less mean squared error than maximum likelihood, and the same with Gaussian ones.
 - `Filter<R, M>`: built from an `ArimaSpec` alone, it expands the seasonal polynomials into its own arrays, differences raw values in place, returns one-step innovations,
@@ -84,7 +86,9 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
   FPP3 recommends.
 - `loglike` and `innovations` (and their `_exog` forms) for any model size, through the same recursion as the filter.
 - `AutoArima`: the stepwise search (or an exhaustive one, parallel with the `rayon` feature) with `ndiffs` and
-  `nsdiffs` choosing `d` and `D`; AICc by default, AIC or BIC on request.
+  `nsdiffs` choosing `d` and `D`; AICc by default, AIC or BIC on request. `.approximation(true)` ranks the candidates
+  by CSS fits and refits only the winner exactly (R's `approximation=TRUE`): 23× faster on the airline series, with
+  the same choice there and on 7 of the 8 pmdarima series (the eighth is a tie within 0.01 AICc).
 - `stl`: STL decomposition with statsmodels' defaults, and the seasonal strength it implies.
 - `mstl`: MSTL for several seasonal periods (daily and weekly on hourly data), and `stl_with` for a chosen seasonal
   window; both match statsmodels to 1e-9. `box_cox` and `box_cox_lambda` (scipy's maximum-likelihood lambda) transform

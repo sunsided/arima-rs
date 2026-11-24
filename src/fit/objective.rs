@@ -263,13 +263,13 @@ pub(crate) struct Estimate {
 /// The optimiser takes the steady-state shortcut; the reported values do not.
 /// `bfgs_scratch` holds at least [`bfgs::scratch_len`]`(x.len())` values.
 ///
-/// With `css_scratch` (at least [`Objective::css_scratch_len`]), it first minimises the
-/// conditional sum of squares, as R's default `CSS-ML` does, and hands both its optimum
-/// and its inverse Hessian to the exact likelihood. The two objectives share their
-/// curvature near the optimum, so the expensive phase starts nearly converged. If the
-/// CSS optimum is worse than `x` under the exact likelihood (another local optimum), the
-/// exact phase starts from `x` as without it. The result is the exact-likelihood optimum
-/// either way.
+/// With [`Css::WarmStart`] it first minimises the conditional sum of squares, as R's
+/// default `CSS-ML` does, and hands both its optimum and its inverse Hessian to the exact
+/// likelihood. The two objectives share their curvature near the optimum, so the expensive
+/// phase starts nearly converged. If the CSS optimum is worse than `x` under the exact
+/// likelihood (another local optimum), the exact phase starts from `x` as without it. The
+/// result is the exact-likelihood optimum either way. With [`Css::Only`] it stops at the
+/// CSS optimum, as R's `CSS`, and evaluates the exact likelihood there once.
 ///
 /// # Errors
 ///
@@ -280,33 +280,36 @@ pub(crate) fn estimate(
     x: &mut [f64],
     bfgs_scratch: &mut [f64],
     max_iterations: usize,
-    css_scratch: Option<&mut [f64]>,
+    css: Css,
+    css_scratch: &mut [f64],
 ) -> Result<Estimate, FitError> {
     let options = bfgs::Options {
         max_iterations,
         ..bfgs::Options::default()
     };
 
-    #[cfg(feature = "alloc")]
-    let (css_iterations, warm_hessian) = match css_scratch {
-        Some(scratch) => css_phase(objective, x, bfgs_scratch, options, scratch),
-        None => (0, false),
-    };
+    // Without `alloc` only `Css::Off` exists, and nothing reads the scratch.
     #[cfg(not(feature = "alloc"))]
-    let (css_iterations, warm_hessian) = {
-        let _ = css_scratch;
-        (0, false)
+    let _ = css_scratch;
+    let (iterations, converged) = match css {
+        Css::Off => exact_phase(objective, x, bfgs_scratch, options, 0, false),
+        #[cfg(feature = "alloc")]
+        Css::WarmStart => {
+            let (css_iterations, warm) =
+                css_phase(objective, x, bfgs_scratch, options, css_scratch);
+            exact_phase(objective, x, bfgs_scratch, options, css_iterations, warm)
+        }
+        #[cfg(feature = "alloc")]
+        Css::Only => {
+            let minimum = bfgs::minimize(
+                |u| objective.css(u, css_scratch).unwrap_or(f64::INFINITY),
+                x,
+                bfgs_scratch,
+                options,
+            );
+            (minimum.iterations, minimum.converged)
+        }
     };
-
-    let minimum = bfgs::minimize(
-        |u| exact(objective, u),
-        x,
-        bfgs_scratch,
-        bfgs::Options {
-            warm_hessian,
-            ..options
-        },
-    );
 
     let (loglike, sigma2, nobs) = objective.evaluate(x, false).ok_or(FitError::Degenerate)?;
     if math::sqrt(sigma2) <= NOISE_FLOOR * objective.range() {
@@ -317,9 +320,45 @@ pub(crate) fn estimate(
         loglike,
         sigma2,
         nobs,
-        iterations: css_iterations + minimum.iterations,
-        converged: minimum.converged,
+        iterations,
+        converged,
     })
+}
+
+/// What [`estimate`] does with the conditional sum of squares. Both CSS modes take their
+/// working memory from `css_scratch`, at least [`Objective::css_scratch_len`] values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Css {
+    /// Nothing: the exact likelihood from the given start.
+    Off,
+    /// A warm start for the exact likelihood.
+    #[cfg(feature = "alloc")]
+    WarmStart,
+    /// The CSS optimum is the estimate; the exact likelihood is only evaluated there.
+    #[cfg(feature = "alloc")]
+    Only,
+}
+
+/// Minimises the exact objective from `x`, seeded with the inverse Hessian in `bfgs_scratch`
+/// when `warm`. Returns the iterations, `earlier` included, and whether it converged.
+fn exact_phase(
+    objective: &mut Objective<'_>,
+    x: &mut [f64],
+    bfgs_scratch: &mut [f64],
+    options: bfgs::Options,
+    earlier: usize,
+    warm: bool,
+) -> (usize, bool) {
+    let minimum = bfgs::minimize(
+        |u| exact(objective, u),
+        x,
+        bfgs_scratch,
+        bfgs::Options {
+            warm_hessian: warm,
+            ..options
+        },
+    );
+    (earlier + minimum.iterations, minimum.converged)
 }
 
 /// The exact objective the optimiser minimises: `-loglike / n` with the steady-state

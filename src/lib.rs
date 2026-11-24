@@ -71,7 +71,7 @@ pub use crate::fit::{
     Arima, ArmaCoefficients, AutoArima, AutoFit, Criterion, Fitted, Fixed, FourierFit, MstlArima,
     MstlForecast, Pmm2Fit, hannan_rissanen, nsdiffs,
 };
-pub use crate::fit::{FitError, Refit, RefitOptions, Refitter};
+pub use crate::fit::{FitError, Method, Refit, RefitOptions, Refitter};
 #[cfg(feature = "alloc")]
 pub use crate::fourier::fourier;
 pub use crate::fourier::{FourierError, fourier_columns, fourier_row};

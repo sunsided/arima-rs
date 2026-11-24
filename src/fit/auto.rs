@@ -20,7 +20,7 @@
 //! ```
 
 use super::roots::max_inverse_root;
-use super::{Arima, FitError, Fitted};
+use super::{Arima, FitError, Fitted, Method};
 use crate::fourier::{FourierError, fourier, fourier_columns};
 use crate::stl::SEASONAL_STRENGTH_THRESHOLD;
 use crate::{ndiffs, polynomial, stl};
@@ -76,6 +76,9 @@ pub struct AutoArima {
     criterion: Criterion,
     /// Whether to search stepwise (`true`) or over every order within the bounds.
     stepwise: bool,
+    /// Whether candidates are fitted by conditional sum of squares, and only the chosen one
+    /// by exact likelihood.
+    approximation: bool,
 }
 
 /// The four searched orders `(p, q, P, Q)`.
@@ -159,6 +162,7 @@ impl AutoArima {
             seasonal_d: None,
             criterion: Criterion::Aicc,
             stepwise: true,
+            approximation: false,
         }
     }
 
@@ -215,6 +219,31 @@ impl AutoArima {
     pub fn exhaustive(self) -> Self {
         Self {
             stepwise: false,
+            ..self
+        }
+    }
+
+    /// Fits the candidates by conditional sum of squares ([`Method::Css`]) and only the
+    /// chosen order by exact likelihood, as R's `auto.arima(approximation = TRUE)`.
+    ///
+    /// Each candidate then costs a fraction of an exact fit, and is still ranked by the exact
+    /// likelihood at its CSS estimates. The ranking can differ from the exact search where
+    /// candidates are close; the returned model is always an exact fit. If the chosen order
+    /// fails its exact fit or turns out near a unit root, the next best is tried, as in R.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use backshift::AutoArima;
+    ///
+    /// let y: Vec<f64> = (0..200).map(|t| (t as f64 * 0.7).sin() + 0.02 * t as f64).collect();
+    /// let quick = AutoArima::new().approximation(true).fit(&y).unwrap();
+    /// assert!(quick.fitted.loglike.is_finite());
+    /// ```
+    #[must_use]
+    pub fn approximation(self, approximation: bool) -> Self {
+        Self {
+            approximation,
             ..self
         }
     }
@@ -419,6 +448,10 @@ impl Search<'_> {
         }
 
         let candidates = self.cache.len();
+        if self.auto.approximation {
+            return self.refit_exactly(candidates);
+        }
+
         let Some((key, criterion)) = self.best else {
             return Err(self.first_error());
         };
@@ -434,6 +467,32 @@ impl Search<'_> {
             criterion,
             candidates,
         })
+    }
+
+    /// Refits the approximate candidates exactly, best first, and returns the first that
+    /// passes: its criterion is finite and it is not near a unit root.
+    fn refit_exactly(&self, candidates: usize) -> Result<AutoFit, FitError> {
+        let mut ranked: Vec<(f64, Key)> = self
+            .cache
+            .iter()
+            .filter(|(_, (score, _))| score.is_finite())
+            .map(|(key, (score, _))| (*score, *key))
+            .collect();
+        ranked.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+        for (_, (orders, constant)) in ranked {
+            if let (criterion, Ok(fitted)) = self.score_with(orders, constant, Method::Exact) {
+                if criterion.is_finite() {
+                    return Ok(AutoFit {
+                        fitted,
+                        criterion,
+                        candidates,
+                    });
+                }
+            }
+        }
+
+        Err(self.first_error())
     }
 
     /// Why no candidate was selected: the error of the smallest failed candidate (keys sort
@@ -672,6 +731,21 @@ impl Search<'_> {
     /// Fits a candidate and returns its criterion, or `+inf` if it fails or has an inverse
     /// root of modulus above [`MAX_INVERSE_ROOT`].
     fn score(&self, orders: Orders, constant: bool) -> (f64, Result<Fitted, FitError>) {
+        let method = if self.auto.approximation {
+            Method::Css
+        } else {
+            Method::Exact
+        };
+        self.score_with(orders, constant, method)
+    }
+
+    /// Like [`Search::score`], with the candidate estimated by `method`.
+    fn score_with(
+        &self,
+        orders: Orders,
+        constant: bool,
+        method: Method,
+    ) -> (f64, Result<Fitted, FitError>) {
         let model = Arima::new(orders.p, self.d, orders.q);
         let model = if self.seasonal {
             model.seasonal(
@@ -683,7 +757,7 @@ impl Search<'_> {
         } else {
             model
         };
-        let model = model.mean(constant);
+        let model = model.mean(constant).method(method);
         let fitted = match model.fit_exog(self.y, self.regressors, self.columns) {
             Ok(fitted) => fitted,
             Err(error) => return (f64::INFINITY, Err(error)),
