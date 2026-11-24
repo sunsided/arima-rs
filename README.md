@@ -55,7 +55,7 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
 ## What's in it
 
 - `Arima::new(p, d, q).seasonal(P, D, Q, s).fit(y)`: exact Gaussian maximum likelihood with `sigma2` concentrated out, Hannan–Rissanen
-  starting values and an in-crate BFGS; AR and MA parts stay stationary and invertible through statsmodels' PACF
+  starting values, refined by a conditional-sum-of-squares warm start (R's `CSS-ML`), and an in-crate BFGS; AR and MA parts stay stationary and invertible through statsmodels' PACF
   transforms. `Fitted` reports the log-likelihood, AIC, AICc and BIC.
   `fit_from` starts the optimiser from a previous fit or a related model instead (R's `arima(init=)`), and `fit_fixed`
   keeps whole parts at given values (R's `arima(fixed=)`, statsmodels' `fix_params`).
@@ -200,6 +200,8 @@ run in the pinned image of `scripts/r/`): `arima(method = "ML")` fits and `fixed
 standard errors (1e-6, `d` up to 2 and the airline model), `acf`, `pacf`, `Box.test` (1e-9), `fourier` (exact),
 `ndiffs`, `nsdiffs` and `auto.arima`'s orders. [`docs/CONFORMANCE.md`](https://github.com/sunsided/arima-rs/blob/main/docs/CONFORMANCE.md)
 lists every suite, how to regenerate it, and the known differences between the references.
+[`docs/VERIFICATION.md`](https://github.com/sunsided/arima-rs/blob/main/docs/VERIFICATION.md) covers the property tests,
+the Kani proofs of the device path and mutation testing.
 
 In practice the fit ends up 1e-9 to 6e-8 *above* statsmodels' log-likelihood; the parameter tolerance is loose because
 two optimisers stop at slightly different points of a flat likelihood.
@@ -224,25 +226,26 @@ of 15 repeats (5 for the searches) on an Intel Core i7-13700H with Rust 1.100, r
 
 | Model | backshift | foresight | anofox-forecast |
 |---|---|---|---|
-| ARMA(2,1), n=300 | 0.41 ms, −423.0037 | 11.92 ms, −423.0037 | 0.30 ms, −423.0195 |
-| ARIMA(1,1,1) with drift, n=300 | 0.26 ms, −435.5482 | 5.95 ms, −435.5482 | 0.46 ms, −435.5591 |
-| airline (0,1,1)(0,1,1,12), n=144 | 1.53 ms, −194.3233 | 8.15 ms, −194.3233 | 0.20 ms, −195.2358 |
+| ARMA(2,1), n=300 | 0.34 ms, −423.0037 | 17.04 ms, −423.0037 | 0.42 ms, −423.0195 |
+| ARIMA(1,1,1) with drift, n=300 | 0.22 ms, −435.5482 | 8.18 ms, −435.5482 | 0.61 ms, −435.5591 |
+| airline (0,1,1)(0,1,1,12), n=144 | 0.98 ms, −194.3233 | 11.53 ms, −194.3233 | 0.23 ms, −195.2358 |
 
 Fully automatic auto-ARIMA, each crate choosing its own `d` and `D`:
 
 | Series | backshift | foresight | anofox-forecast |
 |---|---|---|---|
-| ARMA(2,1), n=300 | 11.2 ms, (2,0,1) | 49.6 ms, (2,0,1) | 5.8 ms, (2,0,1) |
-| ARIMA(1,1,1), n=300 | 7.3 ms, (0,1,2) | 35.9 ms, (0,1,2) | 3.7 ms, (0,1,2) |
-| airline, n=144 | 95.9 ms, (0,1,1)(0,1,1,12) | 229.2 ms, (0,2,2)(1,0,1,12) | 3,288 ms, (0,2,2)(1,0,1,12) |
+| ARMA(2,1), n=300 | 7.0 ms, (2,0,1) | 67.8 ms, (2,0,1) | 7.0 ms, (2,0,1) |
+| ARIMA(1,1,1), n=300 | 5.2 ms, (0,1,2) | 49.1 ms, (0,1,2) | 4.8 ms, (0,1,2) |
+| airline, n=144 | 85.4 ms, (0,1,1)(0,1,1,12) | 332.9 ms, (0,2,2)(1,0,1,12) | 3,584 ms, (0,2,2)(1,0,1,12) |
 
-On the non-seasonal series all three pick the same model; anofox-forecast searches fastest there. On the seasonal
-series backshift recovers the generating airline model, because its STL seasonal-strength test finds the seasonal
-unit root; the other two crates miss it and difference twice at lag 1 instead.
+On the non-seasonal series all three pick the same model, and backshift and anofox-forecast search about equally
+fast. On the seasonal series backshift recovers the generating airline model, because its STL seasonal-strength test
+finds the seasonal unit root; the other two crates miss it and difference twice at lag 1 instead.
 
-backshift and foresight reach the same maximum in the fits above; anofox-forecast is faster on the seasonal fit but
-stops short of the maximum on all three. Neither of the other two crates streams: backshift's `Filter::<27>::update`
-takes about 0.6 µs per value for the airline model.
+backshift and foresight reach the same maximum in the fits above; anofox-forecast stops short of it on all three.
+That is also why it is faster on the seasonal fit: it optimises the conditional sum of squares, which needs no Kalman
+filter, while backshift uses that only as a warm start for the exact likelihood (R's `CSS-ML`). Neither of the other
+two crates streams: backshift's `Filter::<27>::update` takes about 0.34 µs per value for the airline model.
 
 Reproduce with `cargo run --release --manifest-path ci/compare/Cargo.toml` (add `--features rayon` for the parallel
 seasonal search); `cargo bench` runs the in-crate Criterion benchmarks.

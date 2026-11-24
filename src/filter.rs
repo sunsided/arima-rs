@@ -123,24 +123,36 @@ impl ArimaSpec<'_> {
     /// regressor capacity `M` must hold `exog.len()`.
     #[must_use]
     pub fn states(&self) -> usize {
-        self.arma_states() + self.differencing_order()
+        self.arma_states().saturating_add(self.differencing_order())
     }
 
     /// The state dimension of the expanded ARMA part, `max(p + P s, q + Q s + 1)`.
+    ///
+    /// Saturates at `usize::MAX` instead of wrapping, so an absurd period cannot pass a
+    /// capacity check (see [`ArimaSpec::validate`]).
     pub(crate) fn arma_states(&self) -> usize {
         let s = self.seasonal.period;
-        let ar = self.ar.len() + self.seasonal.ar.len() * s;
-        let ma = self.ma.len() + self.seasonal.ma.len() * s;
-        ar.max(ma + 1)
+        let ar = self
+            .ar
+            .len()
+            .saturating_add(self.seasonal.ar.len().saturating_mul(s));
+        let ma = self
+            .ma
+            .len()
+            .saturating_add(self.seasonal.ma.len().saturating_mul(s));
+        ar.max(ma.saturating_add(1))
     }
 
-    /// The degree of the differencing polynomial, `d + D s`.
+    /// The degree of the differencing polynomial, `d + D s`, saturating like
+    /// [`ArimaSpec::arma_states`].
     pub(crate) const fn differencing_order(&self) -> usize {
-        self.d + self.seasonal.d * self.seasonal.period
+        self.d
+            .saturating_add(self.seasonal.d.saturating_mul(self.seasonal.period))
     }
 
-    /// Checks that every parameter is finite, `sigma2` is positive, and a non-empty
-    /// seasonal part has a period.
+    /// Checks that every parameter is finite, `sigma2` is positive, a non-empty seasonal
+    /// part has a period, and the state count does not overflow (it saturates at
+    /// `usize::MAX` then).
     pub(crate) fn validate(&self) -> Result<(), FilterError> {
         let seasonal = &self.seasonal;
         let coefficients = self
@@ -157,6 +169,7 @@ impl ArimaSpec<'_> {
             || !self.mean.is_finite()
             || !self.sigma2.is_finite()
             || self.sigma2 <= 0.0
+            || self.states() == usize::MAX
         {
             return Err(FilterError::InvalidParameter);
         }
@@ -190,7 +203,8 @@ pub enum FilterError {
         /// The filter's capacity `R`.
         capacity: usize,
     },
-    /// A coefficient or the mean is not finite, or `sigma2` is not positive and finite.
+    /// A coefficient or the mean is not finite, `sigma2` is not positive and finite, or the
+    /// period is so large that the number of states overflows `usize`.
     InvalidParameter,
     /// The AR part is not stationary, so the model has no unconditional covariance
     /// to start from.
@@ -294,7 +308,8 @@ impl<const R: usize, const M: usize> Filter<R, M> {
     /// # Errors
     ///
     /// - [`FilterError::InvalidParameter`] if a coefficient or the mean is not finite,
-    ///   `sigma2 <= 0`, or a non-empty seasonal part has period 0.
+    ///   `sigma2 <= 0`, a non-empty seasonal part has period 0, or the state count
+    ///   overflows `usize`.
     /// - [`FilterError::Capacity`] if the model needs more than `R` states.
     /// - [`FilterError::Regressors`] if the model has more than `M` regression coefficients.
     /// - [`FilterError::NonStationary`] if the AR part is not stationary.
@@ -1015,5 +1030,23 @@ mod tests {
             assert!((a.value - b.value).abs() < 1e-8);
         }
         assert!(steady.steady.unwrap().0.converged());
+    }
+
+    #[test]
+    fn overflowing_state_counts_are_rejected() {
+        // `2 * period` wraps to 0 in release builds, which used to pass the capacity check.
+        let spec = ArimaSpec {
+            seasonal: Seasonal {
+                ar: &[0.1, 0.1],
+                d: 0,
+                ma: &[],
+                period: usize::MAX / 2 + 1,
+            },
+            ..ArimaSpec::default()
+        };
+        assert_eq!(
+            Filter::<4>::new(&spec).unwrap_err(),
+            FilterError::InvalidParameter
+        );
     }
 }

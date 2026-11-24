@@ -106,20 +106,75 @@ impl<'a> Objective<'a> {
             self.centered,
         );
 
-        let model = self.model;
-        let shape = ArimaSpec {
-            ar: parameters.ar,
-            d: model.d,
-            ma: parameters.ma,
-            seasonal: Seasonal {
-                ar: parameters.seasonal_ar,
-                d: model.seasonal_d,
-                ma: parameters.seasonal_ma,
-                period: model.period,
-            },
-            ..ArimaSpec::default()
-        };
-        concentrated(self.centered, &shape, steady, self.filter)
+        concentrated(
+            self.centered,
+            &shape(self.model, &parameters),
+            steady,
+            self.filter,
+        )
+    }
+
+    /// The scratch [`estimate`]'s CSS phase needs for `model` on `n` differenced values and
+    /// `columns` regressors: the expanded AR and MA polynomials, the residuals, and a copy
+    /// of the start to fall back to.
+    #[cfg(feature = "alloc")]
+    pub(crate) const fn css_scratch_len(model: &Arima, n: usize, columns: usize) -> usize {
+        2 * model.arma_states() + n + model.parameter_count(columns)
+    }
+
+    /// The conditional-sum-of-squares objective at `u`, `0.5 ln(css / m)`: R's `CSS`, which
+    /// conditions on the first `p + P s` values and zero earlier shocks, scaled like the
+    /// exact objective `-loglike / n` so that both share their curvature near the optimum.
+    ///
+    /// It costs `O(n r)` against the exact likelihood's `O(n r²)`. Returns [`None`] if a
+    /// value is missing, none is left after conditioning, or the residuals vanish.
+    /// `scratch` holds at least [`Objective::css_scratch_len`] values.
+    #[cfg(feature = "alloc")]
+    pub(crate) fn css(&mut self, u: &[f64], mut scratch: &mut [f64]) -> Option<f64> {
+        self.constrain(u);
+        let parameters = split(self.model, self.params);
+        residual_into(
+            self.dy,
+            self.dx,
+            self.columns,
+            parameters.exog,
+            parameters.mean,
+            self.centered,
+        );
+
+        let shape = shape(self.model, &parameters);
+        let r = shape.arma_states();
+        let phi = take(&mut scratch, r);
+        let selection = take(&mut scratch, r);
+        shape.expand_arma_into(phi, selection);
+
+        let w = &*self.centered;
+        let conditioned = self.model.p + self.model.seasonal_p * self.model.period;
+        let residuals = &mut scratch[..w.len()];
+        let mut sum = 0.0;
+        for t in 0..w.len() {
+            if t < conditioned {
+                residuals[t] = 0.0;
+                continue;
+            }
+
+            let mut e = w[t];
+            for i in 1..=conditioned {
+                e -= phi[i - 1] * w[t - i];
+            }
+            for j in 1..r.min(t + 1) {
+                e -= selection[j] * residuals[t - j];
+            }
+            residuals[t] = e;
+            sum += e * e;
+        }
+
+        let m = w.len().saturating_sub(conditioned);
+        if m == 0 || !sum.is_finite() || sum <= 0.0 {
+            return None;
+        }
+
+        Some(0.5 * math::ln(sum / m as f64))
     }
 
     /// The range (largest minus smallest) of the non-missing differenced values: the
@@ -208,6 +263,14 @@ pub(crate) struct Estimate {
 /// The optimiser takes the steady-state shortcut; the reported values do not.
 /// `bfgs_scratch` holds at least [`bfgs::scratch_len`]`(x.len())` values.
 ///
+/// With `css_scratch` (at least [`Objective::css_scratch_len`]), it first minimises the
+/// conditional sum of squares, as R's default `CSS-ML` does, and hands both its optimum
+/// and its inverse Hessian to the exact likelihood. The two objectives share their
+/// curvature near the optimum, so the expensive phase starts nearly converged. If the
+/// CSS optimum is worse than `x` under the exact likelihood (another local optimum), the
+/// exact phase starts from `x` as without it. The result is the exact-likelihood optimum
+/// either way.
+///
 /// # Errors
 ///
 /// [`FitError::Degenerate`] if the likelihood cannot be evaluated at the optimum, or the
@@ -217,19 +280,32 @@ pub(crate) fn estimate(
     x: &mut [f64],
     bfgs_scratch: &mut [f64],
     max_iterations: usize,
+    css_scratch: Option<&mut [f64]>,
 ) -> Result<Estimate, FitError> {
     let options = bfgs::Options {
         max_iterations,
         ..bfgs::Options::default()
     };
+
+    #[cfg(feature = "alloc")]
+    let (css_iterations, warm_hessian) = match css_scratch {
+        Some(scratch) => css_phase(objective, x, bfgs_scratch, options, scratch),
+        None => (0, false),
+    };
+    #[cfg(not(feature = "alloc"))]
+    let (css_iterations, warm_hessian) = {
+        let _ = css_scratch;
+        (0, false)
+    };
+
     let minimum = bfgs::minimize(
-        |u| match objective.evaluate(u, true) {
-            Some((llf, _, n)) => -llf / n as f64,
-            None => f64::INFINITY,
-        },
+        |u| exact(objective, u),
         x,
         bfgs_scratch,
-        options,
+        bfgs::Options {
+            warm_hessian,
+            ..options
+        },
     );
 
     let (loglike, sigma2, nobs) = objective.evaluate(x, false).ok_or(FitError::Degenerate)?;
@@ -241,9 +317,46 @@ pub(crate) fn estimate(
         loglike,
         sigma2,
         nobs,
-        iterations: minimum.iterations,
+        iterations: css_iterations + minimum.iterations,
         converged: minimum.converged,
     })
+}
+
+/// The exact objective the optimiser minimises: `-loglike / n` with the steady-state
+/// shortcut, or `+inf` where it cannot be evaluated.
+fn exact(objective: &mut Objective<'_>, u: &[f64]) -> f64 {
+    match objective.evaluate(u, true) {
+        Some((llf, _, n)) => -llf / n as f64,
+        None => f64::INFINITY,
+    }
+}
+
+/// The CSS phase of [`estimate`]: moves `x` to the CSS optimum if that is better under the
+/// exact likelihood, leaving the CSS inverse Hessian in `bfgs_scratch`. Returns the CSS
+/// iterations and whether that Hessian should seed the exact phase.
+#[cfg(feature = "alloc")]
+fn css_phase(
+    objective: &mut Objective<'_>,
+    x: &mut [f64],
+    bfgs_scratch: &mut [f64],
+    options: bfgs::Options,
+    mut scratch: &mut [f64],
+) -> (usize, bool) {
+    let start = take(&mut scratch, x.len());
+    start.copy_from_slice(x);
+    let minimum = bfgs::minimize(
+        |u| objective.css(u, scratch).unwrap_or(f64::INFINITY),
+        x,
+        bfgs_scratch,
+        options,
+    );
+
+    if minimum.iterations > 0 && exact(objective, x) <= exact(objective, start) {
+        return (minimum.iterations, true);
+    }
+
+    x.copy_from_slice(start);
+    (minimum.iterations, false)
 }
 
 /// Writes the unconstrained form of `coefficients` into `out`, negated first for an AR
@@ -264,6 +377,22 @@ pub(crate) fn unconstrain_part(
 
     if !transform::unconstrain(input, out, work) {
         out[..n].fill(0.0);
+    }
+}
+
+/// The ARMA shape of `model` at `parameters`, without mean or differencing.
+fn shape<'p>(model: &Arima, parameters: &Parameters<'p>) -> ArimaSpec<'p> {
+    ArimaSpec {
+        ar: parameters.ar,
+        d: model.d,
+        ma: parameters.ma,
+        seasonal: Seasonal {
+            ar: parameters.seasonal_ar,
+            d: model.seasonal_d,
+            ma: parameters.seasonal_ma,
+            period: model.period,
+        },
+        ..ArimaSpec::default()
     }
 }
 

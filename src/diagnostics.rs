@@ -50,7 +50,13 @@ pub fn ljung_box(residuals: &[f64], lags: usize, model_df: usize) -> Option<Test
     }
 
     let mean = mean(residuals);
-    let c0: f64 = residuals.iter().map(|x| (x - mean) * (x - mean)).sum();
+    let c0: f64 = residuals
+        .iter()
+        .map(|x| {
+            let deviation = x - mean;
+            deviation * deviation
+        })
+        .sum();
     if c0 == 0.0 {
         return None;
     }
@@ -442,5 +448,17 @@ mod tests {
         assert_eq!(kpss(&x, KpssNull::Level, 4), None);
         #[cfg(feature = "alloc")]
         assert_eq!(ndiffs(&x, 0.05, 2), 0);
+    }
+
+    #[test]
+    fn jarque_bera_needs_two_values() {
+        assert_eq!(jarque_bera(&[1.0]), None);
+        assert!(jarque_bera(&[1.0, 2.0]).is_some());
+    }
+
+    #[test]
+    fn kpss_needs_three_values() {
+        assert_eq!(kpss(&[1.0, 2.0], KpssNull::Level, 0), None);
+        assert!(kpss(&[1.0, 3.0, 2.0], KpssNull::Level, 0).is_some());
     }
 }

@@ -114,6 +114,8 @@ mod state_space;
 #[cfg(feature = "alloc")]
 mod stl;
 mod time_series;
+#[cfg(kani)]
+mod verification;
 
 /// Compiles the README's code examples as doctests, so they cannot drift.
 #[cfg(all(doctest, feature = "alloc"))]

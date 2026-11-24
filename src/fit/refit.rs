@@ -184,8 +184,13 @@ impl ArimaSpec<'_> {
         self.start_into(options, x, work);
         let bfgs_scratch = take(&mut scratch, bfgs::scratch_len(x.len()));
         let mut objective = Objective::new(&model, dy, dx, columns, &[], scratch);
-        let estimate =
-            objective::estimate(&mut objective, x, bfgs_scratch, options.max_iterations)?;
+        let estimate = objective::estimate(
+            &mut objective,
+            x,
+            bfgs_scratch,
+            options.max_iterations,
+            None,
+        )?;
 
         let parameters = objective.parameters();
         let parts = [

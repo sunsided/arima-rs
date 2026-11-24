@@ -19,6 +19,9 @@ pub(crate) struct Options {
     pub(crate) gradient_tolerance: f64,
     /// Stop when an iteration improves the objective by at most this, relative to `max(1, |f|)`.
     pub(crate) value_tolerance: f64,
+    /// Start from the inverse Hessian a previous [`minimize`] left in the scratch, instead
+    /// of the identity: a related objective's curvature saves the first iterations.
+    pub(crate) warm_hessian: bool,
 }
 
 impl Options {
@@ -32,6 +35,7 @@ impl Default for Options {
             max_iterations: Self::DEFAULT_MAX_ITERATIONS,
             gradient_tolerance: 1e-7,
             value_tolerance: 1e-13,
+            warm_hessian: false,
         }
     }
 }
@@ -127,8 +131,10 @@ pub(crate) fn minimize(
 
     let b = Buffers::new(scratch, n);
     gradient_at(&mut f, x, value, b.point, b.gradient);
-    identity(b.inverse_hessian, n);
-    let mut fresh = true;
+    if !options.warm_hessian {
+        identity(b.inverse_hessian, n);
+    }
+    let mut fresh = !options.warm_hessian;
     for iteration in 0..options.max_iterations {
         if max_abs(b.gradient) <= options.gradient_tolerance {
             return Minimum {
