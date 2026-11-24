@@ -98,6 +98,26 @@ pub struct Arima {
     period: usize,
     /// Whether to estimate the mean of the differenced series.
     mean: bool,
+    /// How the coefficients are estimated.
+    method: Method,
+}
+
+/// How [`Arima::fit`] estimates the coefficients.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Method {
+    /// Exact Gaussian maximum likelihood, warm-started by conditional sum of squares (R's
+    /// default `CSS-ML`). The default.
+    #[default]
+    Exact,
+    /// Conditional sum of squares only (R's `method = "CSS"`): about as fast as the warm-up
+    /// alone, but the estimates stop short of the exact optimum, by more on short or
+    /// strongly seasonal series. On 144 monthly values of the airline model the
+    /// log-likelihood is 0.003 below the optimum; on 55 quarterly values with a seasonal MA
+    /// near the invertibility boundary it is 1.06 below (CSS conditions on zero pre-sample
+    /// shocks, which a strong seasonal MA remembers for whole seasons). The fit still reports the exact log-likelihood at its
+    /// estimates, so its AIC and BIC compare with exact fits. With missing values it falls
+    /// back to [`Method::Exact`], since the conditional recursion cannot skip a value.
+    Css,
 }
 
 impl Arima {
@@ -135,6 +155,7 @@ impl Arima {
             seasonal_q: 0,
             period: 0,
             mean: d == 0,
+            method: Method::Exact,
         }
     }
 
@@ -168,6 +189,24 @@ impl Arima {
             mean: include,
             ..self
         }
+    }
+
+    /// How to estimate the coefficients; [`Method::Exact`] by default.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use backshift::{Arima, Method};
+    ///
+    /// let y: Vec<f64> = (0..120).map(|t| (t as f64 * 0.9).sin() + 0.01 * t as f64).collect();
+    /// let exact = Arima::new(1, 1, 1).fit(&y).unwrap();
+    /// let quick = Arima::new(1, 1, 1).method(Method::Css).fit(&y).unwrap();
+    /// // Both report the exact log-likelihood; the exact fit's is never lower.
+    /// assert!(exact.loglike >= quick.loglike - 1e-6);
+    /// ```
+    #[must_use]
+    pub fn method(self, method: Method) -> Self {
+        Self { method, ..self }
     }
 
     /// Fits the model to `y` by exact maximum likelihood.
@@ -347,7 +386,11 @@ impl Arima {
             mean: self.mean,
             ..RefitOptions::default()
         };
-        if start.refit_model(options) != *self || start.exog.len() != columns {
+        let shape = Arima {
+            method: self.method,
+            ..start.refit_model(options)
+        };
+        if shape != *self || start.exog.len() != columns {
             return Err(FitError::StartMismatch);
         }
 
@@ -401,15 +444,22 @@ impl Arima {
         let mut objective = Objective::new(self, &dy, &dx, columns, &pinned, &mut scratch);
         let mut bfgs_scratch = vec![0.0; bfgs::scratch_len(x.len())];
         let max_iterations = bfgs::Options::default().max_iterations;
-        // A cold start on complete data warms up on the cheap CSS objective, as R's `CSS-ML`.
-        let mut css_scratch = (start.is_none() && !dy.iter().any(|v| v.is_nan()))
-            .then(|| vec![0.0; Objective::css_scratch_len(self, dy.len(), columns)]);
+        // The conditional recursion cannot skip a missing value, so CSS needs complete data.
+        // It warms up a cold exact fit (R's `CSS-ML`) or is the whole fit with `Method::Css`.
+        let complete = !residual_has_gaps(&dy, &dx, columns);
+        let mut css_scratch = vec![0.0; Objective::css_scratch_len(self, dy.len(), columns)];
+        let css = match (self.method, complete, start.is_some()) {
+            (Method::Css, true, _) => objective::Css::Only,
+            (Method::Exact, true, false) => objective::Css::WarmStart,
+            _ => objective::Css::Off,
+        };
         let estimate = objective::estimate(
             &mut objective,
             &mut x,
             &mut bfgs_scratch,
             max_iterations,
-            css_scratch.as_deref_mut(),
+            css,
+            &mut css_scratch,
         )?;
         let parameters = objective.parameters();
 
@@ -532,6 +582,12 @@ fn missing_if_infinite(values: &[f64]) -> Vec<f64> {
         .iter()
         .map(|&v| if v.is_finite() { v } else { f64::NAN })
         .collect()
+}
+
+/// Whether any differenced value or regressor is missing.
+#[cfg(feature = "alloc")]
+fn residual_has_gaps(dy: &[f64], dx: &[f64], columns: usize) -> bool {
+    (0..dy.len()).any(|t| residual_is_missing(dy, dx, columns, t))
 }
 
 /// Whether observation `t` of the differenced data has a missing value; `dx` is

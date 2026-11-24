@@ -189,7 +189,8 @@ impl ArimaSpec<'_> {
             x,
             bfgs_scratch,
             options.max_iterations,
-            None,
+            objective::Css::Off,
+            &mut [],
         )?;
 
         let parameters = objective.parameters();
@@ -245,6 +246,7 @@ impl ArimaSpec<'_> {
             seasonal_q: self.seasonal.ma.len(),
             period: self.seasonal.period,
             mean: options.mean,
+            method: super::Method::Exact,
         }
     }
 

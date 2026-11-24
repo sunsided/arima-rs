@@ -1,7 +1,7 @@
 //! Checks Hannan–Rissanen and maximum-likelihood fitting against statsmodels.
 
 use crate::arma_data::{ALL, ArmaCase};
-use backshift::{Arima, FitError, difference, hannan_rissanen};
+use backshift::{Arima, FitError, Method, difference, hannan_rissanen};
 
 /// Absolute tolerance on fitted coefficients and means, relative tolerance on `sigma2`.
 ///
@@ -166,4 +166,37 @@ fn fit_from_rejects_other_orders() {
 
     let with_regressor = model(case).fit_exog_from(case.values, case.values, 1, &fitted.spec());
     assert_eq!(with_regressor, Err(FitError::StartMismatch));
+}
+
+#[test]
+fn css_fits_never_beat_the_exact_optimum() {
+    for case in ALL {
+        let model = model(case);
+        let (Ok(exact), Ok(css)) = (
+            model.fit(case.values),
+            model.method(Method::Css).fit(case.values),
+        ) else {
+            continue;
+        };
+        // Both report the exact log-likelihood, so the exact fit's is never lower.
+        assert!(
+            css.loglike <= exact.loglike + LOGLIKE_SLACK,
+            "{css:?} vs {exact:?}"
+        );
+    }
+}
+
+#[test]
+fn css_falls_back_to_exact_with_missing_values() {
+    let mut y: Vec<f64> = ALL[0].values.to_vec();
+    y[10] = f64::NAN;
+    let model = model(ALL[0]);
+    assert_eq!(model.method(Method::Css).fit(&y), model.fit(&y));
+}
+
+#[test]
+fn css_fits_accept_a_start() {
+    let model = model(ALL[0]).method(Method::Css);
+    let first = model.fit(ALL[0].values).unwrap();
+    assert!(model.fit_from(ALL[0].values, &first.spec()).is_ok());
 }
