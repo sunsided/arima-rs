@@ -141,11 +141,11 @@ impl<const M: usize> OnlineAr<M> {
     /// Feeds the next value, learns from its error, and returns that one-step error
     /// `y - predict()`.
     ///
-    /// A `NaN` value counts as missing: nothing is learned, its error is `NaN`, and its
-    /// prediction takes its place in the history.
+    /// A non-finite value (`NaN` or infinite) counts as missing: nothing is learned, its
+    /// error is `NaN`, and its prediction takes its place in the history.
     pub fn update(&mut self, y: f64) -> f64 {
         let prediction = self.predict();
-        if y.is_nan() {
+        if !y.is_finite() {
             self.push(prediction);
             return f64::NAN;
         }
@@ -291,5 +291,16 @@ mod tests {
         assert!(ar.update(f64::NAN).is_nan());
         assert_eq!(*ar.coefficients(), before);
         assert_eq!(ar.lags[0], prediction);
+    }
+
+    #[test]
+    fn infinite_values_count_as_missing() {
+        let mut ar = OnlineAr::<2>::new(OnlineArOptions::default()).unwrap();
+        for t in 0..20 {
+            ar.update((f64::from(t) * 0.7).sin());
+        }
+        assert!(ar.update(f64::INFINITY).is_nan());
+        assert!(ar.update(0.3).is_finite());
+        assert!(ar.predict().is_finite());
     }
 }

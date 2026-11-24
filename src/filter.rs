@@ -389,7 +389,8 @@ impl<const R: usize, const M: usize> Filter<R, M> {
     /// differenced, demeaned value.
     ///
     /// Returns [`None`] for the first `k = d + D s` observations, which only prime the
-    /// differencing. A `NaN` observation counts as missing, as in statsmodels: its
+    /// differencing. A `NaN` observation counts as missing, as in statsmodels, and so does
+    /// an infinite one (as in fitting): its
     /// innovation value is `NaN` and the filter only moves forward in time. A missing
     /// value also makes every difference that uses it missing.
     ///
@@ -408,6 +409,8 @@ impl<const R: usize, const M: usize> Filter<R, M> {
     /// Panics if `x` does not have one entry per regression coefficient.
     pub fn update_exog(&mut self, y: f64, x: &[f64]) -> Option<Innovation> {
         let u = y - self.regression(x);
+        // An infinite value would poison the state for good, so it counts as missing.
+        let u = if u.is_finite() { u } else { f64::NAN };
         let w = self.difference(u)? - self.mean;
 
         let r = self.r;
@@ -415,10 +418,17 @@ impl<const R: usize, const M: usize> Filter<R, M> {
         let mut scratch = [0.0; R];
         let (system, a, p) = self.parts();
         let innovation = if let Some((steady, gain)) = &mut steady {
-            let mut previous = [[0.0; R]; R];
+            // A converged step never compares covariances, so it skips the R² buffer.
+            let mut storage;
+            let previous: &mut [f64] = if steady.converged() {
+                &mut []
+            } else {
+                storage = [[0.0; R]; R];
+                storage.as_flattened_mut()
+            };
             let buffers = SteadyBuffers {
                 gain,
-                previous: previous.as_flattened_mut(),
+                previous,
                 scratch: &mut scratch,
             };
             steady.step(system, a, p, R, w, buffers)
@@ -976,5 +986,34 @@ mod tests {
                 capacity: 2
             })
         );
+    }
+
+    #[test]
+    fn infinite_values_count_as_missing() {
+        let mut filter = filter(&[0.5], &[0.3], 1.0);
+        filter.update(0.1);
+        assert!(filter.update(f64::INFINITY).unwrap().value.is_nan());
+        assert!(filter.update(0.2).unwrap().value.is_finite());
+
+        let (mut mean, mut variance) = ([0.0; 2], [0.0; 2]);
+        filter.forecast_into(&mut mean, &mut variance);
+        assert!(mean.iter().all(|m| m.is_finite()));
+    }
+
+    #[test]
+    fn converged_steady_state_matches_the_full_recursion() {
+        let spec = ArimaSpec {
+            ar: &[0.5],
+            ma: &[0.3],
+            ..ArimaSpec::default()
+        };
+        let mut exact = Filter::<2>::new(&spec).unwrap();
+        let mut steady = Filter::<2>::new(&spec).unwrap().with_steady_state();
+        for t in 0..300 {
+            let y = (f64::from(t) * 0.7).sin();
+            let (a, b) = (exact.update(y).unwrap(), steady.update(y).unwrap());
+            assert!((a.value - b.value).abs() < 1e-8);
+        }
+        assert!(steady.steady.unwrap().0.converged());
     }
 }
