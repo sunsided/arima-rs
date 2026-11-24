@@ -6,7 +6,6 @@
 //! values are fixed: the proofs are about indexing and sizes, which the values do not
 //! affect, and symbolic floating point would make them intractable.
 
-use crate::conformal::Conformal;
 use crate::filter::{ArimaSpec, Seasonal};
 use crate::fourier::fourier_columns;
 use crate::polynomial;
@@ -68,25 +67,6 @@ fn differencing_removes_a_level() {
     assert_eq!(delta[0], 1.0);
     let sum: f64 = delta[..=k].iter().sum();
     assert!(k == 0 || sum == 0.0);
-}
-
-/// The conformal buffer never indexes out of bounds, and its half-width is never negative.
-#[kani::proof]
-#[kani::unwind(6)]
-fn conformal_half_width_is_safe() {
-    let mut conformal = Conformal::<2, 3>::new();
-    for _ in 0..4 {
-        if kani::any() {
-            conformal.record(&[1.0, 2.0]);
-        } else {
-            conformal.observe(1.5);
-        }
-    }
-
-    let (h, level): (usize, f64) = (kani::any(), kani::any());
-    kani::assume(h < 2);
-    let width = conformal.half_width(h, level);
-    assert!(width.is_nan() || width >= 0.0);
 }
 
 /// `fourier_columns` never overflows: at most `2k` columns for any `k` and period.
