@@ -180,3 +180,21 @@ fn pmm2_rejects_seasonal_models() {
     let seasonal = Arima::new(1, 0, 0).seasonal(1, 0, 0, 4);
     assert_eq!(seasonal.fit_pmm2(&y), Err(FitError::Unsupported));
 }
+
+#[test]
+fn innovations_line_up_with_the_differenced_series() {
+    // The PMM2 design pairs innovation `t` with differenced value `t`. For an AR(1) with a
+    // mean, the exact innovation from `t = 1` on is `(z_t - mu) - phi (z_(t-1) - mu)`.
+    let y = [3.0, 2.5, 4.0, 3.2, 2.9, 3.8, 3.1];
+    let spec = backshift::ArimaSpec {
+        ar: &[0.5],
+        mean: 3.0,
+        ..backshift::ArimaSpec::default()
+    };
+    let innovations = backshift::innovations(&y, &spec).unwrap();
+    assert_eq!(innovations.len(), y.len());
+    for t in 1..y.len() {
+        let expected = (y[t] - 3.0) - 0.5 * (y[t - 1] - 3.0);
+        assert!((innovations[t].value - expected).abs() < 1e-12, "t = {t}");
+    }
+}
