@@ -204,6 +204,12 @@ fn main() {
     theta.forecast_interval_into(0.9, &mut t_mean, &mut t_lower, &mut t_upper);
     std::hint::black_box((&t_mean, &t_lower, &t_upper));
 
+    let demand = [0.0, 3.0, 0.0, 0.0, 5.0, 0.0, 2.0, 0.0, 0.0, 4.0];
+    let croston = backshift::CrostonFilter::optimised(&demand, backshift::CrostonVariant::Sba)
+        .expect("two demands");
+    let tsb = backshift::TsbFilter::optimised(&demand).expect("two demands");
+    std::hint::black_box((croston.forecast(), tsb.forecast()));
+
     let mut fourier = [0.0; 4];
     backshift::fourier_row(365.25, 2, 1_000_000, &mut fourier).expect("valid terms");
     std::hint::black_box(&fourier);

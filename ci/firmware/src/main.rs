@@ -107,6 +107,14 @@ pub extern "C" fn _start() -> ! {
         core::hint::black_box((innovation, mean, variance));
     }
 
+    if let Ok(mut croston) = backshift::CrostonFilter::new(0.1, backshift::CrostonVariant::Sba) {
+        croston.warm_up(&[0.0, 3.0, 0.0, 2.0]);
+        core::hint::black_box(croston.update(core::hint::black_box(0.0)));
+    }
+    if let Ok(tsb) = backshift::TsbFilter::optimised(&[0.0, 3.0, 0.0, 2.0, 0.0, 4.0]) {
+        core::hint::black_box(tsb.forecast());
+    }
+
     let mut window = [0.0; WINDOW];
     for (t, value) in window.iter_mut().enumerate() {
         *value = core::hint::black_box(t as f64 * 0.5);
