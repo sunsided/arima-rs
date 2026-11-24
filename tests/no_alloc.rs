@@ -169,6 +169,25 @@ fn main() {
     assert!(e_lower.iter().all(|v| v.is_finite()));
     std::hint::black_box((&e_mean, &e_lower, &e_upper));
 
+    let var_spec = backshift::VarSpec {
+        intercept: &[0.5, -0.2],
+        lags: &[0.5, 0.1, 0.2, 0.3],
+        sigma: &[1.0, 0.2, 0.2, 0.5],
+    };
+    let gram_inverse = [0.01, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.01];
+    let mut online_var = backshift::OnlineVar::<2, 3>::new(&var_spec)
+        .expect("valid model")
+        .with_learning(&gram_inverse, 0.99)
+        .expect("valid learning");
+    let mut var_innovation = [0.0; 2];
+    for t in 0..20 {
+        let row = [f64::from(t % 3), f64::from(t % 2)];
+        std::hint::black_box(online_var.update(&row, &mut var_innovation));
+    }
+    let (mut v_mean, mut v_lower, mut v_upper) = ([0.0; 6], [0.0; 6], [0.0; 6]);
+    online_var.forecast_interval_into(0.9, &mut v_mean, &mut v_lower, &mut v_upper);
+    std::hint::black_box((&v_mean, &v_lower, &v_upper));
+
     let mut fourier = [0.0; 4];
     backshift::fourier_row(365.25, 2, 1_000_000, &mut fourier).expect("valid terms");
     std::hint::black_box(&fourier);

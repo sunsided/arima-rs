@@ -74,6 +74,20 @@ pub extern "C" fn _start() -> ! {
         core::hint::black_box((innovation, mean, lower, upper));
     }
 
+    let var_spec = backshift::VarSpec {
+        intercept: &[0.5, -0.2],
+        lags: &[0.5, 0.1, 0.2, 0.3],
+        sigma: &[1.0, 0.2, 0.2, 0.5],
+    };
+    if let Ok(mut online_var) = backshift::OnlineVar::<2, 3>::new(&var_spec) {
+        let mut innovation = [0.0; 2];
+        online_var.update(&[1.0, 0.5], &mut innovation);
+        let score = online_var.update(core::hint::black_box(&[1.2, 0.4]), &mut innovation);
+        let (mut mean, mut variance) = ([0.0; 4], [0.0; 4]);
+        online_var.forecast_into(&mut mean, &mut variance);
+        core::hint::black_box((score, mean, variance));
+    }
+
     let mut window = [0.0; WINDOW];
     for (t, value) in window.iter_mut().enumerate() {
         *value = core::hint::black_box(t as f64 * 0.5);

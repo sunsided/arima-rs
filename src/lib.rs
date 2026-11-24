@@ -70,7 +70,8 @@ pub use crate::filter::{ArimaSpec, Filter, FilterError, Seasonal};
 #[cfg(feature = "alloc")]
 pub use crate::fit::{
     Arima, ArmaCoefficients, AutoArima, AutoEts, AutoFit, Criterion, Ets, EtsFit, Fitted, Fixed,
-    FourierFit, MstlArima, MstlForecast, Pmm2Fit, hannan_rissanen, nsdiffs,
+    FourierFit, MstlArima, MstlForecast, Pmm2Fit, Var, VarFit, VarForecast, VarOrders,
+    hannan_rissanen, nsdiffs, select_var_order,
 };
 pub use crate::fit::{FitError, Method, Refit, RefitOptions, Refitter};
 #[cfg(feature = "alloc")]
@@ -88,6 +89,7 @@ pub use crate::stl::{
     SEASONAL_STRENGTH_THRESHOLD, find_period, mstl, stl, stl_with,
 };
 pub use crate::time_series::{TimeSeries, TimeSeriesError};
+pub use crate::var::{OnlineVar, VarSpec};
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 use core::borrow::Borrow;
@@ -106,6 +108,7 @@ mod filter;
 mod fit;
 mod fourier;
 mod likelihood;
+mod linalg;
 mod math;
 mod normal;
 mod online;
@@ -116,6 +119,7 @@ mod state_space;
 #[cfg(feature = "alloc")]
 mod stl;
 mod time_series;
+mod var;
 #[cfg(kani)]
 mod verification;
 

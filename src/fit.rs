@@ -34,6 +34,8 @@ mod refit;
 #[cfg(feature = "alloc")]
 mod roots;
 mod transform;
+#[cfg(feature = "alloc")]
+mod var;
 
 #[cfg(feature = "alloc")]
 pub use auto::{AutoArima, AutoFit, Criterion, FourierFit, nsdiffs};
@@ -46,6 +48,8 @@ pub use mstl::{MstlArima, MstlForecast};
 #[cfg(feature = "alloc")]
 pub use pmm2::Pmm2Fit;
 pub use refit::{Refit, RefitOptions, Refitter};
+#[cfg(feature = "alloc")]
+pub use var::{Var, VarFit, VarForecast, VarOrders, select_var_order};
 
 #[cfg(feature = "alloc")]
 use crate::filter::{ArimaSpec, Seasonal};

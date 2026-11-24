@@ -12,6 +12,7 @@ tolerance-based tests decide.
 |---|---|---|---|---|
 | statsmodels | `scripts/generate_reference.py` | `scripts/requirements.txt` | `reference_data.rs`, `arma_data.rs`, `stl_data.rs` | ACF, PACF, autocovariance, Yule–Walker, Burg, Ljung–Box, Jarque–Bera, KPSS (1e-9); filter innovations, `extend`, forecasts and intervals (1e-9); log-likelihood; ML fits; Hannan–Rissanen; STL (1e-9) |
 | statsmodels, coreforecast | `scripts/generate_streaming_reference.py` | `scripts/requirements.txt` | `steady_data.rs`, `fourier_data.rs`, `mstl_data.rs`, `period_data.rs`, `fixed_data.rs` | steady-state filter (1e-13), Fourier terms, MSTL with Box–Cox (1e-9), period detection, fits with fixed parts |
+| statsmodels (VAR) | `scripts/generate_var_reference.py` | `scripts/requirements.txt` | `var_data.rs` | `VAR(y, exog).fit(p)`: coefficients, `sigma_u`, `sigma_u_mle`, log-likelihood, AIC, BIC, HQIC, FPE, forecasts, `forecast_cov` and 95% intervals (1e-8, VARX with future regressors included); `select_order` choices |
 | pmdarima | `scripts/generate_auto_reference.py` | its own environment (see the script) | `auto_data.rs` | the stepwise auto-ARIMA search with `d` and `D` fixed |
 | R 4.4.2, forecast 8.23 | `scripts/generate_r_reference.R` | `scripts/r/Dockerfile` | `r_data.rs` | `arima(method = "ML")` fits and `fixed =`, `predict` forecasts and standard errors (1e-6), `acf`, `pacf`, `Box.test` (1e-9), `fourier`, `ndiffs`, `nsdiffs`, `auto.arima` orders |
 | R 4.4.2, forecast 8.23 (ETS) | `scripts/generate_r_ets_reference.R` | `scripts/r/Dockerfile` | `r_ets_data.rs` | all 15 models of R's default set at R's parameters: residuals, states, forecasts and 80/95% intervals (1e-9; class 1, 2 and 3); fits reach R's likelihood or higher; `ets(y)` and `ets(y, additive.only = TRUE)` choose R's model or one that scores better |
@@ -22,6 +23,7 @@ Run the generators from the repository root:
 uv venv --python 3.11 .venv && uv pip install --python .venv -r scripts/requirements.txt
 .venv/bin/python -I scripts/generate_reference.py
 .venv/bin/python -I scripts/generate_streaming_reference.py
+.venv/bin/python -I scripts/generate_var_reference.py
 
 docker build -t backshift-r-reference scripts/r
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rscript scripts/generate_r_reference.R

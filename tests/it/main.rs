@@ -16,6 +16,7 @@
 //! - [`online`] compares the online AR predictor with the exact filter under changing dynamics.
 //! - [`pmm2`] compares PMM2 with maximum likelihood on series with skewed innovations.
 //! - [`properties`] checks mathematical invariants on random series with proptest.
+//! - [`var`] compares VAR and VARX fits, forecasts and lag selection against statsmodels.
 //! - [`model_properties`] checks the filter, fits and search on random models and series.
 
 mod arma;
@@ -46,3 +47,5 @@ mod steady;
 mod steady_data;
 mod stl;
 mod stl_data;
+mod var;
+mod var_data;
