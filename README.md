@@ -77,6 +77,8 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
 - `AutoArima`: the stepwise search (or an exhaustive one, parallel with the `rayon` feature) with `ndiffs` and
   `nsdiffs` choosing `d` and `D`; AICc by default, AIC or BIC on request.
 - `stl`: STL decomposition with statsmodels' defaults, and the seasonal strength it implies.
+- `mstl`: MSTL for several seasonal periods (daily and weekly on hourly data), and `stl_with` for a chosen seasonal
+  window; both match statsmodels to 1e-9.
 - Diagnostics: `ljung_box`, `jarque_bera` and `kpss` (heap-free, so a device can check its own residuals), and
   `ndiffs` to choose `d`.
 - The building blocks: `acov`, `acorr`, `pacf`, `difference`, `integrate`, `yule_walker`, `burg`, `hannan_rissanen`
