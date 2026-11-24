@@ -7,6 +7,7 @@
 //! - [`fit`] compares Hannan–Rissanen and maximum-likelihood fits against statsmodels.
 //! - [`stl`] compares the STL decomposition against statsmodels.
 //! - [`mstl`] compares the MSTL decomposition against statsmodels.
+//! - [`period`] compares the seasonal period candidates against coreforecast.
 //! - [`steady`] compares the filter's steady-state mode against statsmodels.
 //! - [`properties`] checks mathematical invariants on random series with proptest.
 
@@ -19,6 +20,8 @@ mod fourier;
 mod fourier_data;
 mod mstl;
 mod mstl_data;
+mod period;
+mod period_data;
 mod properties;
 mod reference;
 mod reference_data;

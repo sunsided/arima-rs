@@ -22,6 +22,7 @@
 use super::roots::max_inverse_root;
 use super::{Arima, FitError, Fitted};
 use crate::fourier::{FourierError, fourier, fourier_columns};
+use crate::stl::SEASONAL_STRENGTH_THRESHOLD;
 use crate::{ndiffs, polynomial, stl};
 use alloc::collections::BTreeMap;
 use alloc::vec;
@@ -786,7 +787,7 @@ pub fn nsdiffs(x: &[f64], period: usize, max_seasonal_d: usize) -> usize {
     let mut series = x.to_vec();
     for seasonal_d in 0..max_seasonal_d {
         let strength = stl(&series, period).map_or(0.0, |parts| parts.seasonal_strength());
-        if strength < 0.64 {
+        if strength < SEASONAL_STRENGTH_THRESHOLD {
             return seasonal_d;
         }
 

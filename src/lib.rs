@@ -77,7 +77,10 @@ pub use crate::likelihood::{innovations, innovations_exog, loglike, loglike_exog
 pub use crate::normal::normal_quantile;
 pub use crate::state_space::Innovation;
 #[cfg(feature = "alloc")]
-pub use crate::stl::{Decomposition, MSTL_ITERATIONS, MultiDecomposition, mstl, stl, stl_with};
+pub use crate::stl::{
+    Decomposition, MSTL_ITERATIONS, MultiDecomposition, PeriodCandidate,
+    SEASONAL_STRENGTH_THRESHOLD, find_period, mstl, stl, stl_with,
+};
 pub use crate::time_series::{TimeSeries, TimeSeriesError};
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
