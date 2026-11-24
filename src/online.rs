@@ -180,8 +180,18 @@ impl<const M: usize> OnlineAr<M> {
 
     /// `A^-1 <- (P - P g g' P / (lambda + g' P g)) / lambda` with `P` the old inverse:
     /// Sherman–Morrison for `A = lambda A_old + g g'`.
+    ///
+    /// Forgetting is skipped (`lambda = 1`) while it would lift a diagonal entry of the
+    /// inverse above its start `1 / epsilon`. Without that cap, a stretch of zero
+    /// gradients (a constant zero input) would grow the inverse by `1 / lambda` per step
+    /// until it overflows, the "windup" of recursive least squares.
     fn update_inverse(&mut self, g: &[f64; M]) {
-        let lambda = self.options.forgetting;
+        let largest = (0..M).map(|i| self.inverse[i][i]).fold(0.0, f64::max);
+        let lambda = if largest / self.options.forgetting > 1.0 / self.options.epsilon {
+            1.0
+        } else {
+            self.options.forgetting
+        };
         let mut pg = [0.0; M];
         for (value, row) in pg.iter_mut().zip(&self.inverse) {
             *value = row.iter().zip(g).map(|(p, g)| p * g).sum();
@@ -250,6 +260,23 @@ mod tests {
             "{:?}",
             ar.coefficients()
         );
+    }
+
+    #[test]
+    fn a_long_zero_input_does_not_wind_up() {
+        let mut ar = OnlineAr::<2>::new(OnlineArOptions::default()).unwrap();
+        for _ in 0..1_000_000 {
+            ar.update(0.0);
+        }
+
+        let largest = ar
+            .inverse
+            .iter()
+            .flatten()
+            .fold(0.0_f64, |m, v| m.max(v.abs()));
+        assert!(largest <= 1.0, "{largest}");
+        ar.update(0.5);
+        assert!(ar.update(0.2).is_finite());
     }
 
     #[test]

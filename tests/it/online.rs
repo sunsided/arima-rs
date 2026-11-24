@@ -80,8 +80,8 @@ fn filter_mse(y: &[f64], refit: bool) -> f64 {
     let fitted = Arima::new(5, 0, 2).mean(false).fit(&y[..TRAIN]).unwrap();
     let (mut ar, mut ma, mut sigma2) = (fitted.ar.clone(), fitted.ma.clone(), fitted.sigma2);
     let spec_of = |ar: &[f64], ma: &[f64], sigma2: f64| ArimaSpec {
-        ar: ar.to_vec().leak(),
-        ma: ma.to_vec().leak(),
+        ar: Box::leak(ar.to_vec().into_boxed_slice()),
+        ma: Box::leak(ma.to_vec().into_boxed_slice()),
         sigma2,
         ..ArimaSpec::default()
     };
