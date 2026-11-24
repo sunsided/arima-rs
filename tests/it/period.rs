@@ -40,3 +40,13 @@ fn no_candidates_without_finite_data() {
     assert!(find_period(&[1.0, 2.0, f64::INFINITY, 4.0, 5.0], 2).is_empty());
     assert!(find_period(&[1.0, 2.0, 3.0], 2).is_empty());
 }
+
+#[test]
+fn short_series_give_at_most_the_lags_they_have() {
+    // Four values leave one difference lag to check; five leave two. Neither may panic,
+    // and an empty result is a valid answer.
+    for n in [4, 5] {
+        let y: Vec<f64> = (0..n).map(|t| if t % 2 == 0 { 0.0 } else { 1.0 }).collect();
+        assert!(find_period(&y, n).len() <= n - 3);
+    }
+}

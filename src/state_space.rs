@@ -103,7 +103,8 @@ pub(crate) fn predict(
         }
     }
 
-    // `sel_i * sel_j` is commutative in floating point, so both triangles get the same value.
+    // P is symmetric on entry and after the shift. (i, j) and (j, i) receive the identical
+    // value here, since `sel_i * sel_j == sel_j * sel_i` in floating point, so it stays so.
     for (i, &sel_i) in nonzero(sys.selection) {
         for (j, &sel_j) in nonzero(sys.selection) {
             p[i * stride + j] += sys.sigma2 * (sel_i * sel_j);
@@ -293,8 +294,9 @@ pub(crate) fn update(
     gain[..r].copy_from_slice(&p[..r]);
     for (i, &gain_i) in gain[..r].iter().enumerate() {
         a[i] += gain_i * value / variance;
-        // `gain_i * gain_j` is commutative in floating point, so the full rows stay exactly
-        // symmetric; contiguous rows vectorise, a mirror pass would not.
+        // P is symmetric on entry, and (i, j) and (j, i) lose the identical value, since
+        // `gain_i * gain_j == gain_j * gain_i` in floating point, so it stays exactly
+        // symmetric. Contiguous rows vectorise, a mirror pass would not.
         let row = &mut p[i * stride..i * stride + r];
         for (value, &gain_j) in row.iter_mut().zip(&gain[..r]) {
             *value -= gain_i * gain_j / variance;
