@@ -107,6 +107,11 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
   here. The fit maximises `tseries::garch`'s likelihood and reaches its optimum where tseries' own optimiser stops
   short; the heap-free filter tracks the variance at `O(1)` per value, treats a missing value as its expectation, and
   forecasts the variance's decay to its long-run level.
+- `Cusum` and `Bocpd<R>`: streaming changepoint detection on standardised innovations, heap-free. `Cusum` is Page's
+  two-sided cumulative sum, the classic alarm for a mean shift, tuned by its average run length. `Bocpd` is Bayesian
+  online changepoint detection (Adams and MacKay) with a Normal-Gamma model, so it catches shifts in the mean or the
+  scale and reports how long the current segment has lasted; it keeps `R` run-length hypotheses and is exact while the
+  series is shorter than that.
 - `accuracy`, `cross_validation_errors` and `select_family`: R's `accuracy` measures (ME, RMSE, MAE, MPE, MAPE,
   MASE) and `tsCV` rolling-origin errors for any forecasting closure, both to 1e-12. `select_family` compares
   automatic ARIMA, automatic ETS, Theta, naive and seasonal naive by their mean MASE on the last few forecast origins,

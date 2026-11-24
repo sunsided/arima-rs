@@ -58,6 +58,7 @@ pub use crate::accuracy::{Accuracy, accuracy};
 pub use crate::autoregressive::{ArCoefficients, burg, yule_walker};
 #[cfg(feature = "alloc")]
 pub use crate::box_cox::{box_cox, box_cox_lambda};
+pub use crate::changepoint::{Bocpd, Cusum, NormalGamma, Shift};
 pub use crate::conformal::Conformal;
 #[cfg(feature = "alloc")]
 pub use crate::diagnostics::ndiffs;
@@ -105,6 +106,7 @@ mod autoregressive;
 #[cfg(feature = "alloc")]
 mod box_cox;
 mod buffer;
+mod changepoint;
 mod conformal;
 mod diagnostics;
 #[cfg(feature = "alloc")]
