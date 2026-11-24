@@ -89,6 +89,8 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
   window; both match statsmodels to 1e-9.
   `AutoArima::fit_mstl` forecasts with MSTL plus ARIMA (R's `stlf`): ARIMA on the seasonally adjusted series, each
   seasonal component's last cycle repeated; the intervals ignore the seasonal components' uncertainty.
+  `MstlArima::stream` turns the fit into a heap-free `MstlFilter<R, L>` for devices: a filter on the adjusted series plus
+  the last cycle of each period.
 - `find_period`: ranked seasonal period candidates by coreforecast's rule (the autocovariance of the first differences,
   confirmed by STL seasonal strength above 0.64), to feed `AutoArima::seasonal`, `stl` or `fourier`. A heuristic.
 - Diagnostics: `ljung_box`, `jarque_bera` and `kpss` (heap-free, so a device can check its own residuals), and

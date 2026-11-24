@@ -100,3 +100,48 @@ fn mstl_fit_rejects_missing_values_and_small_filters() {
     y[10] = f64::NAN;
     assert_eq!(model.fit_mstl(&y, &[7]), Err(FitError::Decomposition));
 }
+
+#[test]
+fn stream_starts_where_the_batch_forecast_does_and_keeps_tracking() {
+    let (n, horizon) = (367, 30);
+    let y = two_seasons(n + 2 * horizon);
+    let model = AutoArima::new()
+        .max_orders(2, 2, 0, 0)
+        .fit_mstl(&y[..n], &[30, 7])
+        .unwrap();
+    let batch = model.forecast::<8>(0.95, horizon).unwrap();
+    let mut stream = model.stream::<8, 37>().unwrap();
+    let (mut mean, mut lower, mut upper) = ([0.0; 30], [0.0; 30], [0.0; 30]);
+    stream.forecast_interval_into(0.95, &mut mean, &mut lower, &mut upper);
+    assert_eq!(mean.as_slice(), batch.mean);
+    assert_eq!(lower.as_slice(), batch.lower);
+
+    // Stream the next 30 values, then forecast the 30 after them.
+    for &value in &y[n..n + horizon] {
+        stream.update(value);
+    }
+    stream.forecast_interval_into(0.95, &mut mean, &mut lower, &mut upper);
+    let error: f64 = mean
+        .iter()
+        .zip(&y[n + horizon..])
+        .map(|(f, a)| (f - a).abs())
+        .sum::<f64>()
+        / horizon as f64;
+    assert!(error < 0.6, "mean absolute error {error}");
+}
+
+#[test]
+fn stream_rejects_small_capacities() {
+    let y = two_seasons(200);
+    let model = AutoArima::new()
+        .max_orders(1, 1, 0, 0)
+        .fit_mstl(&y, &[30, 7])
+        .unwrap();
+    assert!(matches!(
+        model.stream::<8, 36>(),
+        Err(backshift::MstlFilterError::Capacity {
+            needed: 37,
+            capacity: 36
+        })
+    ));
+}
