@@ -78,6 +78,9 @@ fn fixed_parts_match_statsmodels_fix_params() {
         if case.fixed_mean {
             assert_eq!(fitted.mean, case.mean);
         }
+        if case.fixed_seasonal_ma {
+            assert_eq!(fitted.seasonal_ma, case.seasonal_ma);
+        }
     }
 }
 
@@ -101,4 +104,42 @@ fn fixed_parts_are_not_counted_in_the_criteria() {
     let held = model(case).fit_fixed(case.values, &start, fixed).unwrap();
     assert_eq!(free.parameters(), held.parameters() + 1);
     assert!(held.loglike <= free.loglike + 1e-9);
+}
+
+#[test]
+fn whole_multi_coefficient_parts_stay_exact() {
+    // Every coefficient of a fixed part keeps its value, not only the first.
+    let case = ALL[1];
+    let start = ArimaSpec {
+        ar: &[0.3, -0.2],
+        ma: &[0.1],
+        mean: case.mean,
+        ..ArimaSpec::default()
+    };
+    let fixed = Fixed {
+        ar: true,
+        ..Fixed::NONE
+    };
+    let fitted = Arima::new(2, 0, 1)
+        .fit_fixed(case.values, &start, fixed)
+        .unwrap();
+    assert_eq!(fitted.ar, [0.3, -0.2]);
+    assert_eq!(fitted.fixed, 2);
+}
+
+#[test]
+fn a_non_stationary_fixed_part_is_degenerate() {
+    let case = ALL[1];
+    let start = ArimaSpec {
+        ar: &[1.2],
+        ma: &[0.1],
+        mean: case.mean,
+        ..ArimaSpec::default()
+    };
+    let fixed = Fixed {
+        ar: true,
+        ..Fixed::NONE
+    };
+    let result = Arima::new(1, 0, 1).fit_fixed(case.values, &start, fixed);
+    assert_eq!(result, Err(backshift::FitError::Degenerate));
 }
