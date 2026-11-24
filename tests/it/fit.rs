@@ -1,7 +1,7 @@
 //! Checks Hannan–Rissanen and maximum-likelihood fitting against statsmodels.
 
 use crate::arma_data::{ALL, ArmaCase};
-use backshift::{Arima, difference, hannan_rissanen};
+use backshift::{Arima, FitError, difference, hannan_rissanen};
 
 /// Absolute tolerance on fitted coefficients and means, relative tolerance on `sigma2`.
 ///
@@ -131,4 +131,39 @@ fn information_criteria_match_statsmodels() {
             case.fit_bic
         );
     }
+}
+
+#[test]
+fn fit_from_a_previous_fit_reaches_the_same_maximum_faster() {
+    for (index, case) in ALL.iter().enumerate() {
+        let model = model(case);
+        let columns = case.exog.len();
+        let first = model
+            .fit_exog(case.values, case.regressors, columns)
+            .unwrap();
+        let again = model
+            .fit_exog_from(case.values, case.regressors, columns, &first.spec())
+            .unwrap();
+        let context = format!("case {index}");
+
+        assert!(again.converged, "{context}");
+        assert!(again.iterations <= first.iterations, "{context}");
+        assert!(
+            again.loglike >= case.fit_loglike - LOGLIKE_SLACK,
+            "{context}: llf {} below statsmodels {}",
+            again.loglike,
+            case.fit_loglike
+        );
+    }
+}
+
+#[test]
+fn fit_from_rejects_other_orders() {
+    let case = ALL[0];
+    let fitted = model(case).fit(case.values).unwrap();
+    let other = Arima::new(2, 0, 0).fit_from(case.values, &fitted.spec());
+    assert_eq!(other, Err(FitError::StartMismatch));
+
+    let with_regressor = model(case).fit_exog_from(case.values, case.values, 1, &fitted.spec());
+    assert_eq!(with_regressor, Err(FitError::StartMismatch));
 }

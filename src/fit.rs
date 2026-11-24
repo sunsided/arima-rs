@@ -193,6 +193,82 @@ impl Arima {
         regressors: &[f64],
         columns: usize,
     ) -> Result<Fitted, FitError> {
+        self.fit_exog_with(y, regressors, columns, None)
+    }
+
+    /// Like [`Arima::fit`], but the optimiser starts from the coefficients of `start`
+    /// instead of Hannan–Rissanen, as R's `arima(init=)` and statsmodels' `start_params` do.
+    ///
+    /// `start` must have this model's orders, differencing and period, for example a
+    /// previous fit of the same model ([`Fitted::spec`]) or one fitted to a related series.
+    /// Its `mean` seeds the mean if this model estimates one; its `sigma2` is not used. A
+    /// part of `start` that is not stationary (or not invertible) starts at zero.
+    ///
+    /// The benefit is speed and reproducibility: no source shows that supplied start values
+    /// improve forecasts over the automatic start.
+    ///
+    /// # Errors
+    ///
+    /// [`FitError::StartMismatch`] if `start` has other orders than this model, otherwise
+    /// as for [`Arima::fit`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use backshift::Arima;
+    ///
+    /// let y = [0.3, 1.1, 0.4, -0.2, 0.9, 1.4, 0.6, 0.1, -0.5, 0.2, 0.8, 1.0, 0.3, -0.1, 0.4];
+    /// let model = Arima::new(1, 0, 1);
+    /// let first = model.fit(&y).unwrap();
+    /// let again = model.fit_from(&y, &first.spec()).unwrap();
+    /// assert!(again.iterations <= first.iterations);
+    /// assert!((again.loglike - first.loglike).abs() < 1e-6);
+    /// ```
+    pub fn fit_from(&self, y: &[f64], start: &ArimaSpec<'_>) -> Result<Fitted, FitError> {
+        self.fit_exog_from(y, &[], 0, start)
+    }
+
+    /// Like [`Arima::fit_exog`], started from `start` as in [`Arima::fit_from`]. `start.exog`
+    /// seeds `beta` and must hold `columns` values.
+    ///
+    /// # Errors
+    ///
+    /// [`FitError::RegressorShape`] for a malformed `regressors`, then
+    /// [`FitError::StartMismatch`] if `start` has other orders than this model or not
+    /// `columns` regression coefficients, otherwise as for [`Arima::fit_exog`].
+    pub fn fit_exog_from(
+        &self,
+        y: &[f64],
+        regressors: &[f64],
+        columns: usize,
+        start: &ArimaSpec<'_>,
+    ) -> Result<Fitted, FitError> {
+        if regressors.len() != y.len() * columns {
+            return Err(FitError::RegressorShape {
+                expected: y.len() * columns,
+                got: regressors.len(),
+            });
+        }
+
+        let options = RefitOptions {
+            mean: self.mean,
+            ..RefitOptions::default()
+        };
+        if start.refit_model(options) != *self || start.exog.len() != columns {
+            return Err(FitError::StartMismatch);
+        }
+
+        self.fit_exog_with(y, regressors, columns, Some(start))
+    }
+
+    /// [`Arima::fit_exog`] from `start`, or from Hannan–Rissanen and least squares without one.
+    fn fit_exog_with(
+        &self,
+        y: &[f64],
+        regressors: &[f64],
+        columns: usize,
+        start: Option<&ArimaSpec<'_>>,
+    ) -> Result<Fitted, FitError> {
         if regressors.len() != y.len() * columns {
             return Err(FitError::RegressorShape {
                 expected: y.len() * columns,
@@ -217,10 +293,15 @@ impl Arima {
             return Err(FitError::TooShort { needed, present });
         }
 
-        let beta_start = self.least_squares_start(&dy, &dx, columns);
-        let mut residual = vec![0.0; dy.len()];
-        objective::residual_into(&dy, &dx, columns, &beta_start, 0.0, &mut residual);
-        let mut x = self.start(&residual, &beta_start);
+        let mut x = match start {
+            Some(spec) => self.start_from(spec),
+            None => {
+                let beta_start = self.least_squares_start(&dy, &dx, columns);
+                let mut residual = vec![0.0; dy.len()];
+                objective::residual_into(&dy, &dx, columns, &beta_start, 0.0, &mut residual);
+                self.start(&residual, &beta_start)
+            }
+        };
 
         let mut scratch = vec![0.0; Objective::scratch_len(self, dy.len(), columns)];
         let mut objective = Objective::new(self, &dy, &dx, columns, &mut scratch);
@@ -292,6 +373,19 @@ impl Arima {
             },
             ..ArimaSpec::default()
         }
+    }
+
+    /// Unconstrained starting values from the coefficients of `spec`, which has this
+    /// model's orders, through the same path as a refit's warm start.
+    fn start_from(&self, spec: &ArimaSpec<'_>) -> Vec<f64> {
+        let options = RefitOptions {
+            mean: self.mean,
+            ..RefitOptions::default()
+        };
+        let mut x = vec![0.0; self.parameter_count(spec.exog.len())];
+        let mut work = vec![0.0; 3 * spec.largest_part()];
+        spec.start_into(options, &mut x, &mut work);
+        x
     }
 
     /// Unconstrained starting values `[ar..., ma..., seasonal ar..., seasonal ma..., mean, beta...]`.
@@ -480,6 +574,9 @@ pub enum FitError {
     },
     /// The Fourier terms of a search are invalid.
     Fourier(FourierError),
+    /// The start values of `Arima::fit_from` (feature `alloc`) have other orders,
+    /// differencing, period or regressor count than the model.
+    StartMismatch,
 }
 
 impl From<FourierError> for FitError {
@@ -505,6 +602,7 @@ impl Display for FitError {
                 write!(f, "buffer holds {got} values, needs {needed}")
             }
             FitError::Fourier(error) => write!(f, "invalid Fourier terms: {error}"),
+            FitError::StartMismatch => write!(f, "the start values do not match the model"),
         }
     }
 }
