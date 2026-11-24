@@ -8,6 +8,7 @@
 
 use anofox_forecast::models::Forecaster;
 mod ets;
+mod var;
 
 use backshift::{Arima, ArimaSpec, AutoArima, Method, Seasonal, loglike};
 use std::time::Instant;
@@ -109,6 +110,7 @@ fn main() {
     }
 
     ets::report();
+    var::report();
     streaming();
 }
 
