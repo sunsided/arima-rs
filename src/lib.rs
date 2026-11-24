@@ -71,14 +71,15 @@ pub use crate::filter::{ArimaSpec, Filter, FilterError, Seasonal};
 #[cfg(feature = "alloc")]
 pub use crate::fit::{
     Arima, ArmaCoefficients, AutoArima, AutoEts, AutoFit, Criterion, Ets, EtsFit, Family,
-    FamilySelection, Fitted, Fixed, FourierFit, MstlArima, MstlForecast, Pmm2Fit, Theta, ThetaFit,
-    Var, VarFit, VarForecast, VarOrders, cross_validation_errors, hannan_rissanen, nsdiffs,
-    select_family, select_var_order,
+    FamilySelection, Fitted, Fixed, FourierFit, Garch, GarchFit, MstlArima, MstlForecast, Pmm2Fit,
+    Theta, ThetaFit, Var, VarFit, VarForecast, VarOrders, cross_validation_errors, hannan_rissanen,
+    nsdiffs, select_family, select_var_order,
 };
 pub use crate::fit::{FitError, Method, Refit, RefitOptions, Refitter};
 #[cfg(feature = "alloc")]
 pub use crate::fourier::fourier;
 pub use crate::fourier::{FourierError, fourier_columns, fourier_row};
+pub use crate::garch::{GarchFilter, GarchSpec};
 pub use crate::intermittent::{CrostonFilter, CrostonVariant, TsbFilter};
 #[cfg(feature = "alloc")]
 pub use crate::likelihood::{innovations, innovations_exog, loglike, loglike_exog};
@@ -112,6 +113,7 @@ mod ets;
 mod filter;
 mod fit;
 mod fourier;
+mod garch;
 mod intermittent;
 mod likelihood;
 mod linalg;

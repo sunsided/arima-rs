@@ -21,6 +21,8 @@
 //! - [`var`] compares VAR and VARX fits, forecasts and lag selection against statsmodels.
 //! - [`backtest`] compares the accuracy measures and rolling-origin errors against R's
 //!   `accuracy` and `tsCV`, and checks the family selection.
+//! - [`garch`] compares GARCH(1,1) against R's `tseries::garch`, and its fit against the
+//!   likelihood's optimum.
 //! - [`model_properties`] checks the filter, fits and search on random models and series.
 
 mod arma;
@@ -36,6 +38,7 @@ mod fixed;
 mod fixed_data;
 mod fourier;
 mod fourier_data;
+mod garch;
 mod model_properties;
 mod mstl;
 mod mstl_data;
@@ -49,6 +52,7 @@ mod r_conformance;
 mod r_croston_data;
 mod r_data;
 mod r_ets_data;
+mod r_garch_data;
 mod r_theta_data;
 mod reference;
 mod reference_data;

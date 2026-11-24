@@ -114,6 +114,18 @@ pub extern "C" fn _start() -> ! {
     if let Ok(tsb) = backshift::TsbFilter::optimised(&[0.0, 3.0, 0.0, 2.0, 0.0, 4.0]) {
         core::hint::black_box(tsb.forecast());
     }
+    let garch_spec = backshift::GarchSpec {
+        omega: 0.1,
+        alpha: 0.1,
+        beta: 0.8,
+        variance: 1.0,
+    };
+    if let Ok(mut garch) = backshift::GarchFilter::new(&garch_spec) {
+        let innovation = garch.update(core::hint::black_box(1.5));
+        let mut variance = [0.0; 3];
+        garch.forecast_into(&mut variance);
+        core::hint::black_box((innovation, variance));
+    }
 
     let mut window = [0.0; WINDOW];
     for (t, value) in window.iter_mut().enumerate() {

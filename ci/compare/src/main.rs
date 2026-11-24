@@ -8,6 +8,7 @@
 
 use anofox_forecast::models::Forecaster;
 mod ets;
+mod garch;
 mod intermittent;
 mod theta;
 mod var;
@@ -115,6 +116,7 @@ fn main() {
     var::report();
     theta::report();
     intermittent::report();
+    garch::report();
     streaming();
 }
 
