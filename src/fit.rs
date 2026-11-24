@@ -20,6 +20,8 @@
 
 #[cfg(feature = "alloc")]
 mod auto;
+#[cfg(feature = "alloc")]
+mod backtest;
 mod bfgs;
 #[cfg(feature = "alloc")]
 mod decompose;
@@ -43,6 +45,8 @@ mod var;
 
 #[cfg(feature = "alloc")]
 pub use auto::{AutoArima, AutoFit, Criterion, FourierFit, nsdiffs};
+#[cfg(feature = "alloc")]
+pub use backtest::{Family, FamilySelection, cross_validation_errors, select_family};
 #[cfg(feature = "alloc")]
 pub use ets::{AutoEts, Ets, EtsFit};
 #[cfg(feature = "alloc")]

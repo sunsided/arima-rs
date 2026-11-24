@@ -232,6 +232,7 @@ fn main() {
         backshift::ljung_box(&history, 3, 1),
         backshift::jarque_bera(&history),
         backshift::kpss(&history, backshift::KpssNull::Level, 2),
+        backshift::accuracy(&history[1..], &history[..history.len() - 1], &history, 1),
     ));
 
     // A ramp with an irregular sawtooth on top: plain arithmetic, and far from an exact fit.

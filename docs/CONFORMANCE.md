@@ -18,6 +18,7 @@ tolerance-based tests decide.
 | R 4.4.2, forecast 8.23 (ETS) | `scripts/generate_r_ets_reference.R` | `scripts/r/Dockerfile` | `r_ets_data.rs` | all 15 models of R's default set at R's parameters: residuals, states, forecasts and 80/95% intervals (1e-9; class 1, 2 and 3); fits reach R's likelihood or higher; `ets(y)` and `ets(y, additive.only = TRUE)` choose R's model or one that scores better |
 | R 4.4.2, forecast 8.23 (Theta) | `scripts/generate_r_theta_reference.R` | `scripts/r/Dockerfile` | `r_theta_data.rs` | `thetaf`: forecasts and 80/95% intervals at R's state (1e-9); the seasonality test, multiplicative indices and drift (1e-9); fitted forecasts (5e-3, from the smoothing's optimum) |
 | R 4.4.2, forecast 8.23 (Croston) | `scripts/generate_r_croston_reference.R` | `scripts/r/Dockerfile` | `r_croston_data.rs` | `croston`: every fitted value (the forecast from the values before it) and the forecast (1e-12). SBA and SBJ are fixed factors on it; TSB has no R reference and is checked against a hand-computed example of its recursion, as statsforecast defines it |
+| R 4.4.2, forecast 8.23 (accuracy) | `scripts/generate_r_accuracy_reference.R` | `scripts/r/Dockerfile` | `r_accuracy_data.rs` | `accuracy`: ME, RMSE, MAE, MPE, MAPE and MASE (seasonal naive scale) of a forecast against its test set (1e-12); `tsCV`: every rolling-origin error of the naive forecast, with its `NaN` pattern (1e-12). `select_family` has no R counterpart and is checked against these measures |
 
 Run the generators from the repository root:
 
@@ -32,6 +33,7 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rsc
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rscript scripts/generate_r_ets_reference.R
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rscript scripts/generate_r_theta_reference.R
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rscript scripts/generate_r_croston_reference.R
+docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rscript scripts/generate_r_accuracy_reference.R
 
 cargo fmt
 ```

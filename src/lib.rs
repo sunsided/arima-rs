@@ -53,6 +53,7 @@ extern crate alloc;
 #[cfg(any(feature = "std", test))]
 extern crate std;
 
+pub use crate::accuracy::{Accuracy, accuracy};
 #[cfg(feature = "alloc")]
 pub use crate::autoregressive::{ArCoefficients, burg, yule_walker};
 #[cfg(feature = "alloc")]
@@ -69,9 +70,10 @@ pub use crate::ets::{EtsFilter, EtsSpec, Form, Trend};
 pub use crate::filter::{ArimaSpec, Filter, FilterError, Seasonal};
 #[cfg(feature = "alloc")]
 pub use crate::fit::{
-    Arima, ArmaCoefficients, AutoArima, AutoEts, AutoFit, Criterion, Ets, EtsFit, Fitted, Fixed,
-    FourierFit, MstlArima, MstlForecast, Pmm2Fit, Theta, ThetaFit, Var, VarFit, VarForecast,
-    VarOrders, hannan_rissanen, nsdiffs, select_var_order,
+    Arima, ArmaCoefficients, AutoArima, AutoEts, AutoFit, Criterion, Ets, EtsFit, Family,
+    FamilySelection, Fitted, Fixed, FourierFit, MstlArima, MstlForecast, Pmm2Fit, Theta, ThetaFit,
+    Var, VarFit, VarForecast, VarOrders, cross_validation_errors, hannan_rissanen, nsdiffs,
+    select_family, select_var_order,
 };
 pub use crate::fit::{FitError, Method, Refit, RefitOptions, Refitter};
 #[cfg(feature = "alloc")]
@@ -96,6 +98,7 @@ pub use crate::var::{OnlineVar, VarSpec};
 use alloc::vec::Vec;
 use core::borrow::Borrow;
 
+mod accuracy;
 #[cfg(feature = "alloc")]
 mod autoregressive;
 #[cfg(feature = "alloc")]
