@@ -17,6 +17,10 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
+mod mstl;
+
+pub use mstl::{MSTL_ITERATIONS, MultiDecomposition, mstl};
+
 /// The components of an STL decomposition: `values = seasonal + trend + remainder`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Decomposition {
@@ -65,12 +69,37 @@ impl Decomposition {
 /// ```
 #[must_use]
 pub fn stl(values: &[f64], period: usize) -> Option<Decomposition> {
+    stl_with(values, period, DEFAULT_SEASONAL_WINDOW)
+}
+
+/// STL like [`stl`], with the seasonal smoother `seasonal_window` instead of 7.
+///
+/// The trend window follows from it as in statsmodels, the smallest odd integer at least
+/// `1.5 period / (1 - 1.5 / seasonal_window)`. Matches statsmodels
+/// `STL(values, period=period, seasonal=seasonal_window).fit()`. A longer window gives a
+/// seasonal pattern that changes more slowly. Returns [`None`] unless `seasonal_window` is
+/// odd and at least 3, `period >= 2`, and `values` holds at least two full seasons of
+/// finite values.
+///
+/// # Examples
+///
+/// ```
+/// use backshift::stl_with;
+///
+/// let y: Vec<f64> = (0..48).map(|t| [3.0, -1.0, 0.5, -2.5][t % 4] + 0.1 * t as f64).collect();
+/// let parts = stl_with(&y, 4, 11).unwrap();
+/// assert!(parts.seasonal_strength() > 0.99);
+/// assert!(stl_with(&y, 4, 8).is_none()); // even window
+/// ```
+#[must_use]
+pub fn stl_with(values: &[f64], period: usize, seasonal_window: usize) -> Option<Decomposition> {
     let n = values.len();
-    if period < 2 || n < 2 * period || !values.iter().all(|v| v.is_finite()) {
+    let window_ok = seasonal_window >= 3 && seasonal_window % 2 == 1;
+    if !window_ok || period < 2 || n < 2 * period || !values.iter().all(|v| v.is_finite()) {
         return None;
     }
 
-    let windows = Windows::defaults(period);
+    let windows = Windows::new(period, seasonal_window);
     let mut seasonal = vec![0.0; n];
     let mut trend = vec![0.0; n];
     for _ in 0..INNER_PASSES {
@@ -84,6 +113,9 @@ pub fn stl(values: &[f64], period: usize) -> Option<Decomposition> {
         remainder,
     })
 }
+
+/// statsmodels' default seasonal smoother.
+const DEFAULT_SEASONAL_WINDOW: usize = 7;
 
 /// statsmodels' number of inner passes without robustness weights.
 const INNER_PASSES: usize = 5;
@@ -99,10 +131,10 @@ struct Windows {
 }
 
 impl Windows {
-    /// statsmodels' defaults for `period`: seasonal 7, trend the smallest odd integer at
-    /// least `1.5 period / (1 - 1.5 / 7)`, low-pass the smallest odd integer above `period`.
-    fn defaults(period: usize) -> Self {
-        let seasonal = 7;
+    /// statsmodels' windows for `period` and the odd seasonal window `seasonal >= 3`: trend
+    /// the smallest odd integer at least `1.5 period / (1 - 1.5 / seasonal)`, low-pass the
+    /// smallest odd integer above `period`.
+    fn new(period: usize, seasonal: usize) -> Self {
         let trend_minimum = 1.5 * period as f64 / (1.0 - 1.5 / seasonal as f64);
         let next_odd_above = |x: f64| {
             // The first odd integer strictly greater than x (x is positive).
@@ -303,16 +335,16 @@ mod tests {
 
     #[test]
     fn default_windows_follow_statsmodels() {
-        let w = Windows::defaults(12);
+        let w = Windows::new(12, 7);
         assert_eq!((w.seasonal, w.trend, w.low_pass), (7, 23, 13));
-        let w = Windows::defaults(4);
+        let w = Windows::new(4, 7);
         assert_eq!((w.trend, w.low_pass), (9, 5));
-        let w = Windows::defaults(7);
+        let w = Windows::new(7, 7);
         assert_eq!((w.trend, w.low_pass), (15, 9));
         // 1.5 * 11 / (1 - 1.5 / 7) is exactly 21, which statsmodels keeps.
-        let w = Windows::defaults(11);
+        let w = Windows::new(11, 7);
         assert_eq!((w.trend, w.low_pass), (21, 13));
-        assert_eq!(Windows::defaults(33).trend, 63);
+        assert_eq!(Windows::new(33, 7).trend, 63);
     }
 
     #[test]
