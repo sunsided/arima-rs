@@ -65,7 +65,7 @@ pub use crate::diagnostics::{
 };
 #[cfg(feature = "alloc")]
 pub use crate::difference::{difference, integrate};
-pub use crate::ets::{EtsFilter, EtsSpec, Trend};
+pub use crate::ets::{EtsFilter, EtsSpec, Form, Trend};
 pub use crate::filter::{ArimaSpec, Filter, FilterError, Seasonal};
 #[cfg(feature = "alloc")]
 pub use crate::fit::{

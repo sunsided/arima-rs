@@ -437,6 +437,11 @@ Each family follows the ARIMA layout, so the edge carries over without a framewo
 A shared trait appears only when backtesting needs to run several families through one loop, and then holds exactly
 what that loop calls (fit, forecast), nothing speculative.
 
+The families are not feature-gated one by one. The linker drops what a binary does not call, so a firmware that
+uses only `Filter` carries no ETS or VAR code; the split that matters for running everywhere is the one that exists,
+heap-free filters without `alloc` and fits behind it. Each feature would multiply the CI matrix. A family gets a
+feature only if it needs a dependency, as the parallel search does with `rayon`, or measurably slows a clean build.
+
 ### Order of work
 
 1. **ETS**, in two pull requests: the additive-error models (linear, the bulk of real use) with `AutoEts` and the

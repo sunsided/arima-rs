@@ -122,6 +122,8 @@ fn main() {
 
     let ets_seasonal = [1.0, -0.5, 0.5, -1.0];
     let ets_spec = backshift::EtsSpec {
+        error: backshift::Form::Additive,
+        season: backshift::Form::Additive,
         alpha: 0.3,
         trend: backshift::Trend::Damped {
             beta: 0.05,
@@ -139,6 +141,32 @@ fn main() {
     }
     let (mut e_mean, mut e_lower, mut e_upper) = ([0.0; 5], [0.0; 5], [0.0; 5]);
     ets.forecast_interval_into(0.9, &mut e_mean, &mut e_lower, &mut e_upper);
+    std::hint::black_box((&e_mean, &e_lower, &e_upper));
+
+    // A multiplicative season forecasts its intervals in caller scratch: 7 q^2 + 3 q + m
+    // values for q = 2 m = 8.
+    let factors = [1.1, 0.9, 1.05, 0.95];
+    let multiplicative = backshift::EtsSpec {
+        error: backshift::Form::Multiplicative,
+        season: backshift::Form::Multiplicative,
+        seasonal: &factors,
+        sigma2: 0.01,
+        ..ets_spec
+    };
+    let mut m_ets = backshift::EtsFilter::<4>::new(&multiplicative).expect("valid model");
+    for t in 0..20 {
+        std::hint::black_box(m_ets.update(10.0 + f64::from(t % 4)));
+    }
+    let mut ets_scratch = [0.0; 7 * 64 + 3 * 8 + 4];
+    assert!(ets_scratch.len() >= m_ets.forecast_scratch_len());
+    m_ets.forecast_interval_with(
+        &mut ets_scratch,
+        0.9,
+        &mut e_mean,
+        &mut e_lower,
+        &mut e_upper,
+    );
+    assert!(e_lower.iter().all(|v| v.is_finite()));
     std::hint::black_box((&e_mean, &e_lower, &e_upper));
 
     let mut fourier = [0.0; 4];

@@ -40,7 +40,8 @@ emit(
   "    pub initial_states: &'static [f64],",
   "    /// The states after the last value, in the same layout.",
   "    pub final_states: &'static [f64],",
-  "    /// The one-step residuals: `y - forecast` for additive errors.",
+  "    /// The one-step residuals: `y - forecast` for additive errors, `(y - forecast) / forecast`",
+  "    /// for multiplicative ones.",
   "    pub residuals: &'static [f64],",
   "    /// R's log-likelihood, `-0.5 * lik`, with its constants dropped.",
   "    pub loglik: f64,",
@@ -65,6 +66,15 @@ simulate <- function(n, m, seed, slope = 0, amplitude = 0, noise = 1, walk = 0.3
   level + slope * t + pattern + rnorm(n, sd = noise)
 }
 
+# A positive series whose noise and season scale with its level, for multiplicative models.
+simulate_multiplicative <- function(n, m, seed, slope = 0, amplitude = 0, noise = 0.03) {
+  set.seed(seed)
+  t <- 1:n
+  level <- 100 * exp(cumsum(rnorm(n, sd = 0.01))) + slope * t
+  pattern <- if (m > 1) 1 + amplitude * sin(2 * pi * ((t - 1) %% m) / m + 0.4) else 1
+  level * pattern * exp(rnorm(n, sd = noise))
+}
+
 cases <- list(
   list(name = "ANN", m = 1, model = "ANN", damped = FALSE, values = simulate(80, 1, 11)),
   list(name = "AAN", m = 1, model = "AAN", damped = FALSE, values = simulate(90, 1, 12, slope = 0.4)),
@@ -73,7 +83,24 @@ cases <- list(
   list(name = "AAA", m = 12, model = "AAA", damped = FALSE,
        values = simulate(120, 12, 15, slope = 0.2, amplitude = 6)),
   list(name = "AADA", m = 12, model = "AAA", damped = TRUE,
-       values = simulate(120, 12, 16, slope = 0.2, amplitude = 6))
+       values = simulate(120, 12, 16, slope = 0.2, amplitude = 6)),
+  list(name = "MNN", m = 1, model = "MNN", damped = FALSE, values = simulate_multiplicative(80, 1, 21)),
+  list(name = "MAN", m = 1, model = "MAN", damped = FALSE,
+       values = simulate_multiplicative(90, 1, 22, slope = 0.5)),
+  list(name = "MADN", m = 1, model = "MAN", damped = TRUE,
+       values = simulate_multiplicative(90, 1, 23, slope = 0.4)),
+  list(name = "MNA", m = 4, model = "MNA", damped = FALSE,
+       values = simulate_multiplicative(64, 4, 24, amplitude = 0.1)),
+  list(name = "MAA", m = 12, model = "MAA", damped = FALSE,
+       values = simulate_multiplicative(120, 12, 25, slope = 0.3, amplitude = 0.1)),
+  list(name = "MADA", m = 12, model = "MAA", damped = TRUE,
+       values = simulate_multiplicative(120, 12, 26, slope = 0.3, amplitude = 0.1)),
+  list(name = "MNM", m = 4, model = "MNM", damped = FALSE,
+       values = simulate_multiplicative(64, 4, 27, amplitude = 0.15)),
+  list(name = "MAM", m = 12, model = "MAM", damped = FALSE,
+       values = simulate_multiplicative(120, 12, 28, slope = 0.3, amplitude = 0.15)),
+  list(name = "MADM", m = 12, model = "MAM", damped = TRUE,
+       values = simulate_multiplicative(120, 12, 29, slope = 0.3, amplitude = 0.15))
 )
 
 for (case in cases) {
@@ -125,6 +152,17 @@ emit(
   "/// as R prints it, for example `\"AAdA\"`.",
   sprintf("pub const AUTO_ADDITIVE: &[&str] = &[%s];", paste(vapply(cases, function(case) {
     fit <- ets(ts(case$values, frequency = case$m), additive.only = TRUE)
+    sprintf("\"%s\"", gsub("ETS\\(|\\)|,", "", fit$method))
+  }, ""), collapse = ", "))
+)
+
+# The automatic search over R's default model set, as `ets(values)`, for each case.
+emit(
+  "",
+  "/// The model `ets(values)` selects by AICc for each case of [`ALL`] (R's default set:",
+  "/// additive and multiplicative errors and seasons, no multiplicative trend).",
+  sprintf("pub const AUTO_DEFAULT: &[&str] = &[%s];", paste(vapply(cases, function(case) {
+    fit <- ets(ts(case$values, frequency = case$m))
     sprintf("\"%s\"", gsub("ETS\\(|\\)|,", "", fit$method))
   }, ""), collapse = ", "))
 )
