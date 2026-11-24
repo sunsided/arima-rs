@@ -48,6 +48,10 @@ harness = false
 name = "holidays_outages"
 required-features = ["alloc"]
 
+[[example]]
+name = "prophet_recipe"
+required-features = ["alloc"]
+
 [[bench]]
 name = "arima"
 harness = false

@@ -78,6 +78,11 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
 - Regression with ARIMA errors: `fit_exog`, `update_exog`, `forecast_exog_into` and friends model `y_t - x_t . beta`
   with the regressors differenced along with `y`, as R's `arima(xreg=)` does. [`examples/holidays_outages.rs`](https://github.com/sunsided/arima-rs/blob/main/examples/holidays_outages.rs)
   fits daily users with bank-holiday and outage dummies, and forecasts through a known upcoming holiday.
+- Prophet-style models as a recipe: `trend_row` (heap-free) and `trend_regressors` build the hinge columns of a
+  piecewise-linear trend, whose coefficients are the slope changes at each changepoint. With Fourier terms and holiday
+  dummies they make Prophet's model, with ARIMA errors instead of white noise.
+  [`examples/prophet_recipe.rs`](https://github.com/sunsided/arima-rs/blob/main/examples/prophet_recipe.rs) recovers
+  two slope changes from a grid of seven changepoints, and forecasts with the trend at its last slope.
 - Fourier regressors: `fourier_row` (heap-free, one row per new value on a device) and `fourier` (several periods
   at once) give sine/cosine pairs in the column order of R's `forecast::fourier()`. With `fit_exog` and
   `update_exog` they model long or non-integer seasons (365.25, 8766) as dynamic harmonic regression, which a
