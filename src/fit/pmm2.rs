@@ -52,8 +52,9 @@ impl Pmm2Fit {
     /// `(2 + g4) / (2 + g4 - g3^2)`: 1 for symmetric innovations, about 1.67 for
     /// Gamma(2, 1) ones. Only the size of the skewness matters, not its sign.
     ///
-    /// It is finite and at least 1: a fit exists only when `mu2 (mu4 - mu2^2) > mu3^2`,
-    /// which is `2 + g4 > g3^2`.
+    /// It is finite and at least 1. A fit exists only when `mu2 (mu4 - mu2^2) > mu3^2`.
+    /// Divided by `mu2^3`, that condition reads `(2 + g4) - g3^2 > 0`, so the
+    /// denominator is positive.
     ///
     /// The paper recommends PMM2 over the start only when this is above about 1.2 and
     /// the series has at least 200 values.
@@ -126,6 +127,12 @@ impl Arima {
             .iter()
             .map(|innovation| innovation.value)
             .collect();
+        // Both hold one value per differenced value: `innovations` filters `z - mean`.
+        assert_eq!(
+            z.len(),
+            residuals.len(),
+            "one innovation per differenced value"
+        );
         let design = Design::new(self, &z, &residuals);
         let moments = Moments::of(&design.residuals).ok_or(FitError::Degenerate)?;
 

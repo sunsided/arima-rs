@@ -154,6 +154,25 @@ fn pmm2_estimates_a_drift_on_differenced_series() {
 }
 
 #[test]
+fn pmm2_fits_an_arma_with_a_mean() {
+    // d = 0 with a mean and an MA term: the intercept column and the lagged innovations.
+    let mut rng = Rng(5);
+    let y: Vec<f64> = simulate(&[0.6], 0, &[-0.4], &mut rng, true)
+        .iter()
+        .map(|v| v + 2.0)
+        .collect();
+    let fit = Arima::new(1, 0, 1).fit_pmm2(&y).unwrap();
+    assert!(fit.fitted.converged);
+    assert!(
+        (fit.fitted.mean - fit.start.mean).abs() < 0.05,
+        "{}",
+        fit.fitted.mean
+    );
+    assert!((fit.fitted.ar[0] - 0.6).abs() < 0.2, "{:?}", fit.fitted.ar);
+    assert!((fit.fitted.ma[0] + 0.4).abs() < 0.2, "{:?}", fit.fitted.ma);
+}
+
+#[test]
 fn pmm2_rejects_seasonal_models() {
     let y: Vec<f64> = (0..60)
         .map(|t| f64::from(t % 4) + 0.1 * f64::from(t))
