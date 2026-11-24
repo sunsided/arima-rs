@@ -260,8 +260,9 @@ backshift and foresight reach the same maximum in the fits above, and anofox-for
 it optimises the conditional sum of squares, which needs no Kalman filter. backshift's exact fits use that only as a
 warm start (R's `CSS-ML`); its approximate fits stop there, like R's `method = "CSS"`, and are the fastest on every
 model while landing within 0.004 of the maximum, closer than anofox-forecast on all three. The approximate search
-refits its choice exactly, so the model it returns is an exact fit. Neither of the other two crates streams:
-backshift's `Filter::<27>::update` takes about 0.33 µs per value for the airline model.
+refits its choice exactly, so the model it returns is an exact fit. Neither of the other two crates streams an ARIMA
+model (anofox-forecast updates its exponential-smoothing models incrementally): backshift's `Filter::<27>::update` takes
+about 0.33 µs per value for the airline model.
 
 Reproduce with `cargo run --release --manifest-path ci/compare/Cargo.toml` (add `--features rayon` for the parallel
 seasonal search); `cargo bench` runs the in-crate Criterion benchmarks.
