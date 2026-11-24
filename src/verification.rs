@@ -49,6 +49,11 @@ fn filter_expansion_stays_in_bounds() {
         return;
     }
 
+    // The capacity check bounds the differencing degree too: `k + 1 <= states() <= R`, so
+    // `differencing` below has room for its `k + 1` coefficients.
+    let k = spec.d + spec.seasonal.d * spec.seasonal.period;
+    assert!(k < R);
+
     let (mut phi, mut selection, mut delta) = ([0.0; R], [0.0; R], [0.0; R]);
     spec.expand_arma_into(&mut phi, &mut selection);
     polynomial::differencing(spec.d, spec.seasonal.d, spec.seasonal.period, &mut delta);
@@ -69,10 +74,15 @@ fn differencing_removes_a_level() {
     assert!(k == 0 || sum == 0.0);
 }
 
-/// `fourier_columns` never overflows: at most `2k` columns for any `k` and period.
+/// `fourier_columns` never overflows and counts right: `2k` columns, or `2k - 1` at the
+/// Nyquist period, for any `k` and period, saturating where `2k` does not fit.
 #[kani::proof]
 fn fourier_columns_never_overflow() {
     let (period, k): (f64, usize) = (kani::any(), kani::any());
     let columns = fourier_columns(period, k);
-    assert!(columns <= k.saturating_mul(2));
+    // `2k`, less the Nyquist sine; saturated where `2k` does not fit in `usize`.
+    match k.checked_mul(2) {
+        Some(two_k) => assert!(columns == two_k || columns + 1 == two_k),
+        None => assert!(columns >= usize::MAX - 1),
+    }
 }
