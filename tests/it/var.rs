@@ -65,6 +65,26 @@ fn lag_selection_matches_statsmodels() {
 }
 
 #[test]
+fn online_filter_forecasts_one_lag_models_like_the_fit() {
+    // With one lag the weight ring has a single slot; each step must read the previous
+    // weight before it overwrites it.
+    let case = ALL.iter().find(|c| c.columns == 0 && c.p == 1).unwrap();
+    assert_eq!(case.k, 3);
+    let fit = fit(case);
+    let mut filter = OnlineVar::<3, 4>::new(&fit.spec()).unwrap();
+    filter.warm_up(case.values);
+    let h = case.mean.len() / 3;
+    assert!(h >= 3, "the case reaches past the first horizon");
+    let (mut mean, mut variance) = (vec![0.0; 3 * h], vec![0.0; 3 * h]);
+    filter.forecast_into(&mut mean, &mut variance);
+    assert_all_close(&mean, case.mean, "online mean");
+    let diagonal: Vec<f64> = (0..h)
+        .flat_map(|step| (0..3).map(move |i| case.forecast_cov[step * 9 + i * 3 + i]))
+        .collect();
+    assert_all_close(&variance, &diagonal, "online variance");
+}
+
+#[test]
 fn online_filter_forecasts_like_the_fit() {
     let case = ALL.iter().find(|c| c.columns == 0 && c.k == 2).unwrap();
     let fit = fit(case);

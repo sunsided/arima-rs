@@ -175,6 +175,11 @@ impl<const K: usize, const D: usize> OnlineVar<K, D> {
     /// exactly those of least squares on every value so far; below 1, older values weigh
     /// less, so the model follows dynamics that drift. `sigma` stays fixed.
     ///
+    /// The guarantee holds only when the filter's coefficients are the least-squares
+    /// solution for the rows that gave `gram_inverse`, as a [`VarFit`](crate::VarFit)'s
+    /// `spec` and `gram_inverse` are. The shapes are checked, the pairing cannot be: with an
+    /// unrelated matrix the filter still learns, from a wrong starting curvature.
+    ///
     /// # Errors
     ///
     /// [`FilterError::InvalidParameter`] if `forgetting` is not in `(0, 1]`, or
