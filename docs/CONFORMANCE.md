@@ -14,6 +14,7 @@ tolerance-based tests decide.
 | statsmodels, coreforecast | `scripts/generate_streaming_reference.py` | `scripts/requirements.txt` | `steady_data.rs`, `fourier_data.rs`, `mstl_data.rs`, `period_data.rs`, `fixed_data.rs` | steady-state filter (1e-13), Fourier terms, MSTL with Box–Cox (1e-9), period detection, fits with fixed parts |
 | pmdarima | `scripts/generate_auto_reference.py` | its own environment (see the script) | `auto_data.rs` | the stepwise auto-ARIMA search with `d` and `D` fixed |
 | R 4.4.2, forecast 8.23 | `scripts/generate_r_reference.R` | `scripts/r/Dockerfile` | `r_data.rs` | `arima(method = "ML")` fits and `fixed =`, `predict` forecasts and standard errors (1e-6), `acf`, `pacf`, `Box.test` (1e-9), `fourier`, `ndiffs`, `nsdiffs`, `auto.arima` orders |
+| R 4.4.2, forecast 8.23 (ETS) | `scripts/generate_r_ets_reference.R` | `scripts/r/Dockerfile` | `r_ets_data.rs` | `ets` at R's parameters: residuals, states, forecasts and 80/95% intervals (1e-9); fits reach R's likelihood or higher; `ets(additive.only = TRUE)` model choice |
 
 Run the generators from the repository root:
 
@@ -24,6 +25,7 @@ uv venv --python 3.11 .venv && uv pip install --python .venv -r scripts/requirem
 
 docker build -t backshift-r-reference scripts/r
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rscript scripts/generate_r_reference.R
+docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rscript scripts/generate_r_ets_reference.R
 
 cargo fmt
 ```
@@ -42,5 +44,14 @@ cargo fmt
   `lambda = 0` reference is `MSTL(log(y))`.
 - **coreforecast's STL** smooths the seasonal part with degree 0. Seasonal strengths near the
   threshold of `find_period` can therefore differ.
+- **R's ETS intervals without a trend.** `forecast:::class1` sets the third state of `G` to
+  `gamma`. That is the first seasonal state only when the model has a slope; for ETS(A,N,A)
+  it is the second, so R adds `gamma^2` at horizons `j = m - 1 (mod m)` instead of
+  `j = 0 (mod m)`. The crate uses the correct horizon, checked by simulation in
+  `tests/it/ets.rs`, and compares only the means of that model with R.
+- **R's ETS likelihood** drops the constants `n (ln(2 pi) + 1 - ln n) / 2`; the crate reports
+  the full Gaussian log-likelihood, as for ARIMA. R estimates the initial states with the
+  smoothing parameters by Nelder–Mead; the crate solves them by least squares at each step,
+  which reaches the same or a higher likelihood on every reference model.
 - **R's `fourier`** starts at `t = 1` and statsmodels' `Fourier` at `t = 0`; `fourier_row` takes
   the origin as an argument.

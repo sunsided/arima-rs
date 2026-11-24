@@ -59,6 +59,21 @@ pub extern "C" fn _start() -> ! {
         core::hint::black_box((innovation, mean, variance, lower, upper));
     }
 
+    let ets_spec = backshift::EtsSpec {
+        alpha: 0.3,
+        trend: backshift::Trend::Additive { beta: 0.05 },
+        gamma: 0.1,
+        level: 10.0,
+        seasonal: &[1.0, -1.0],
+        ..backshift::EtsSpec::default()
+    };
+    if let Ok(mut ets) = backshift::EtsFilter::<2>::new(&ets_spec) {
+        let innovation = ets.update(core::hint::black_box(11.0));
+        let (mut mean, mut lower, mut upper) = ([0.0; 3], [0.0; 3], [0.0; 3]);
+        ets.forecast_interval_into(0.95, &mut mean, &mut lower, &mut upper);
+        core::hint::black_box((innovation, mean, lower, upper));
+    }
+
     let mut window = [0.0; WINDOW];
     for (t, value) in window.iter_mut().enumerate() {
         *value = core::hint::black_box(t as f64 * 0.5);

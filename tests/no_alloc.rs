@@ -1,7 +1,8 @@
 //! Proves the device path never allocates.
 //!
 //! A counting global allocator wraps the system one. The test builds a
-//! [`Filter`], warms it up, streams values, forecasts with intervals, refits the model
+//! [`Filter`], warms it up, streams values, forecasts with intervals (also with an
+//! `EtsFilter`), refits the model
 //! on a window and swaps the new one in, and asserts that the count did not move. It runs without the libtest harness
 //! (`harness = false`), so no harness thread allocates while it measures.
 
@@ -118,6 +119,27 @@ fn main() {
     let (mut s_mean, mut s_lower, mut s_upper) = ([0.0; 5], [0.0; 5], [0.0; 5]);
     seasonal.forecast_interval_into(0.9, &mut s_mean, &mut s_lower, &mut s_upper);
     std::hint::black_box((&s_mean, &s_lower, &s_upper));
+
+    let ets_seasonal = [1.0, -0.5, 0.5, -1.0];
+    let ets_spec = backshift::EtsSpec {
+        alpha: 0.3,
+        trend: backshift::Trend::Damped {
+            beta: 0.05,
+            phi: 0.95,
+        },
+        gamma: 0.1,
+        level: 10.0,
+        slope: 0.2,
+        seasonal: &ets_seasonal,
+        sigma2: 1.0,
+    };
+    let mut ets = backshift::EtsFilter::<4>::new(&ets_spec).expect("valid model");
+    for t in 0..20 {
+        std::hint::black_box(ets.update(10.0 + f64::from(t % 4)));
+    }
+    let (mut e_mean, mut e_lower, mut e_upper) = ([0.0; 5], [0.0; 5], [0.0; 5]);
+    ets.forecast_interval_into(0.9, &mut e_mean, &mut e_lower, &mut e_upper);
+    std::hint::black_box((&e_mean, &e_lower, &e_upper));
 
     let mut fourier = [0.0; 4];
     backshift::fourier_row(365.25, 2, 1_000_000, &mut fourier).expect("valid terms");

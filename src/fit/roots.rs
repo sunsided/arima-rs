@@ -111,6 +111,48 @@ fn evaluate(a: &[f64], z: Complex) -> Complex {
     })
 }
 
+/// Whether every root of `z^n + a_1 z^(n-1) + ... + a_n` has a modulus below `radius`: the
+/// question [`max_inverse_root`] answers by finding all roots, decided here without them.
+///
+/// This is the Schur–Cohn test. It scales the polynomial to the unit circle, then reduces
+/// it one degree at a time: `p` has all roots inside the circle exactly when its constant
+/// term is smaller in modulus than its leading one (the reflection coefficient
+/// `k = c_0 / c_n` has `|k| < 1`), and the reduced polynomial `(p(z) - k p*(z)) / z` has
+/// all roots inside too. It costs `O(n^2)` operations and
+/// no iteration. A root exactly on the circle counts as outside; a `NaN` coefficient fails.
+pub(crate) fn roots_inside(a: &[f64], radius: f64) -> bool {
+    // `c_i` is the coefficient of `z^i` of `p(radius z)`, leading coefficient last.
+    let n = a.len();
+    let mut scale = 1.0;
+    let mut c = alloc::vec![0.0; n + 1];
+    for i in 0..=n {
+        let coefficient = if i == n { 1.0 } else { a[n - 1 - i] };
+        c[i] = coefficient * scale;
+        scale *= radius;
+    }
+
+    // Each step reads the previous polynomial from both ends, so it writes into a copy. It
+    // works with the reflection coefficient `k = c_0 / c_n` and rescales the result to a
+    // leading coefficient of 1: without that, the coefficients square at every step and
+    // underflow for roots near the circle.
+    let mut previous = c.clone();
+    for degree in (1..=n).rev() {
+        let k = c[0] / c[degree];
+        // A `NaN` coefficient gives a `NaN` `k`, which fails too.
+        if k.is_nan() || k.abs() >= 1.0 {
+            return false;
+        }
+
+        previous[..=degree].copy_from_slice(&c[..=degree]);
+        let leading = previous[degree] - k * previous[0];
+        for i in 0..degree {
+            c[i] = (previous[i + 1] - k * previous[degree - 1 - i]) / leading;
+        }
+    }
+
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,5 +191,41 @@ mod tests {
     fn breakdown_fails_closed() {
         // A NaN coefficient poisons every iterate; the check must reject, not return 0.
         assert_eq!(max_inverse_root(&[f64::NAN, 0.1]), f64::INFINITY);
+    }
+
+    #[test]
+    fn schur_cohn_agrees_with_the_roots() {
+        use alloc::vec::Vec;
+
+        // Random polynomials of degrees 1 to 13, against the moduli of their roots.
+        let mut state = 7_u64;
+        let mut uniform = || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            f64::from(u32::try_from(state >> 40).expect("24 bits")) / f64::from(1_u32 << 24) * 2.0
+                - 1.0
+        };
+        let mut checked = 0;
+        for degree in 1..=13 {
+            for _ in 0..200 {
+                let a: Vec<f64> = (0..degree).map(|_| 0.6 * uniform()).collect();
+                let largest = max_inverse_root(&a);
+                // Skip polynomials with a root too near the circle to decide either way.
+                if (largest - 1.0).abs() > 1e-6 {
+                    assert_eq!(roots_inside(&a, 1.0), largest < 1.0, "{a:?}: {largest}");
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 2000);
+    }
+
+    #[test]
+    fn schur_cohn_handles_the_radius_and_nan() {
+        // z - 1.0 has its root on the unit circle: outside at radius 1, inside just beyond.
+        assert!(!roots_inside(&[-1.0], 1.0));
+        assert!(roots_inside(&[-1.0], 1.0 + 1e-10));
+        assert!(!roots_inside(&[f64::NAN], 2.0));
     }
 }

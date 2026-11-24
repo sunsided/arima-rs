@@ -22,6 +22,8 @@
 mod auto;
 mod bfgs;
 #[cfg(feature = "alloc")]
+mod ets;
+#[cfg(feature = "alloc")]
 mod hannan_rissanen;
 #[cfg(feature = "alloc")]
 mod mstl;
@@ -35,6 +37,8 @@ mod transform;
 
 #[cfg(feature = "alloc")]
 pub use auto::{AutoArima, AutoFit, Criterion, FourierFit, nsdiffs};
+#[cfg(feature = "alloc")]
+pub use ets::{AutoEts, Ets, EtsFit};
 #[cfg(feature = "alloc")]
 pub use hannan_rissanen::{ArmaCoefficients, hannan_rissanen};
 #[cfg(feature = "alloc")]
@@ -796,7 +800,7 @@ impl Display for FitError {
                     "model needs {needed} values after differencing, got {present}"
                 )
             }
-            FitError::Degenerate => write!(f, "the series leaves no innovation variance"),
+            FitError::Degenerate => write!(f, "the likelihood has no finite maximum"),
             FitError::BufferTooSmall { needed, got } => {
                 write!(f, "buffer holds {got} values, needs {needed}")
             }

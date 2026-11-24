@@ -89,6 +89,11 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
   `nsdiffs` choosing `d` and `D`; AICc by default, AIC or BIC on request. `.approximation(true)` ranks the candidates
   by CSS fits and refits only the winner exactly (R's `approximation=TRUE`): 15× faster on the airline series, with
   the same choice there and on 7 of the 8 pmdarima series (the eighth is a tie within 0.01 AICc).
+- `Ets`, `AutoEts` and `EtsFilter<M>`: exponential smoothing in R's `forecast::ets` form (additive errors; no, additive
+  or damped trend; no or additive season). The fit concentrates the initial states out by least squares and searches
+  only the smoothing parameters, so it reaches the same or a higher likelihood than R on every model of its conformance
+  suite, and `AutoEts` picks R's model on each series. The heap-free `EtsFilter` continues from a fit's final states at
+  `O(1)` per value and forecasts with R's analytic intervals (corrected for R's misplaced `gamma` in ETS(A,N,A)).
 - `stl`: STL decomposition with statsmodels' defaults, and the seasonal strength it implies.
 - `mstl`: MSTL for several seasonal periods (daily and weekly on hourly data), and `stl_with` for a chosen seasonal
   window; both match statsmodels to 1e-9. `box_cox` and `box_cox_lambda` (scipy's maximum-likelihood lambda) transform
@@ -260,8 +265,25 @@ backshift and foresight reach the same maximum in the fits above, and anofox-for
 it optimises the conditional sum of squares, which needs no Kalman filter. backshift's exact fits use that only as a
 warm start (R's `CSS-ML`); its approximate fits stop there, like R's `method = "CSS"`, and are the fastest on every
 model while landing within 0.004 of the maximum, closer than anofox-forecast on all three. The approximate search
-refits its choice exactly, so the model it returns is an exact fit. Neither of the other two crates streams:
-backshift's `Filter::<27>::update` takes about 0.33 µs per value for the airline model.
+refits its choice exactly, so the model it returns is an exact fit. Neither of the other two crates streams an ARIMA
+model (anofox-forecast updates its exponential-smoothing models incrementally): backshift's `Filter::<27>::update` takes
+about 0.33 µs per value for the airline model.
+
+ETS, scored on the last values of each series, which no crate sees (root mean squared error, lower is better):
+
+| ETS fit | backshift | foresight | anofox-forecast |
+|---|---|---|---|
+| damped trend (A,Ad,N), n=120 | 2.5 ms, 1.950 | 2.4 ms, 1.950 | 0.07 ms, 1.660 |
+| trend + monthly season (A,A,A), n=144 | 4.4 ms, 1.195 | 53.1 ms, 1.195 | 10.6 ms, 1.195 |
+
+| Automatic ETS | backshift | foresight | anofox-forecast |
+|---|---|---|---|
+| damped trend, n=120 | 3.8 ms, (A,Ad,N) | 10.8 ms, (A,Ad,N) | 2.2 ms, (A,Ad,N) |
+| trend + monthly season, n=144 | 30.5 ms, (A,A,A) | 537.3 ms, (A,A,A) | 228.6 ms, (A,A,A) |
+
+All three choose the same models. On the seasonal series backshift fits and searches fastest at the same forecast
+error. On the damped series anofox-forecast is fastest and forecasts best: its estimates differ from backshift's and
+foresight's, which agree with each other (and backshift's reach R's likelihood or higher).
 
 Reproduce with `cargo run --release --manifest-path ci/compare/Cargo.toml` (add `--features rayon` for the parallel
 seasonal search); `cargo bench` runs the in-crate Criterion benchmarks.
