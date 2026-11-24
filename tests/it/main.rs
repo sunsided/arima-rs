@@ -16,6 +16,7 @@
 //! - [`online`] compares the online AR predictor with the exact filter under changing dynamics.
 //! - [`pmm2`] compares PMM2 with maximum likelihood on series with skewed innovations.
 //! - [`properties`] checks mathematical invariants on random series with proptest.
+//! - [`model_properties`] checks the filter, fits and search on random models and series.
 
 mod arma;
 mod arma_data;
@@ -27,6 +28,7 @@ mod fixed;
 mod fixed_data;
 mod fourier;
 mod fourier_data;
+mod model_properties;
 mod mstl;
 mod mstl_data;
 mod online;

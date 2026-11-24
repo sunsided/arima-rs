@@ -55,7 +55,7 @@ impl Error for FourierError {}
 /// The period is compared exactly, so only a period that is exactly `2k` drops the column.
 #[must_use]
 pub fn fourier_columns(period: f64, k: usize) -> usize {
-    2 * k - usize::from(is_nyquist(period, k))
+    k.saturating_mul(2) - usize::from(is_nyquist(period, k))
 }
 
 /// Writes the Fourier regressors of `k` harmonics at `period` for time `t` into `row`.

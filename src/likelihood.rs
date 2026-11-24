@@ -53,6 +53,7 @@ pub fn innovations_exog(
     regressors: &[f64],
     spec: &ArimaSpec<'_>,
 ) -> Result<Vec<Innovation>, FilterError> {
+    spec.validate()?;
     let w = demeaned_difference(&regressed(y, regressors, spec.exog), spec);
     let mut buffer = vec![0.0; workspace_len(spec.arma_states())];
     let mut result = Vec::with_capacity(w.len());
@@ -109,6 +110,7 @@ pub fn loglike_exog(
     regressors: &[f64],
     spec: &ArimaSpec<'_>,
 ) -> Result<f64, FilterError> {
+    spec.validate()?;
     let w = demeaned_difference(&regressed(y, regressors, spec.exog), spec);
     let ln_two_pi = math::ln(core::f64::consts::TAU);
     let mut sum = 0.0;
@@ -228,7 +230,9 @@ pub(crate) fn differenced(y: &[f64], spec: &ArimaSpec<'_>) -> Vec<f64> {
 /// The number of values a [`Workspace`] for `r` states borrows: five vectors of length
 /// `r` and four `r x r` matrices.
 pub(crate) const fn workspace_len(r: usize) -> usize {
-    5 * r + 4 * r * r
+    r.saturating_mul(r)
+        .saturating_mul(4)
+        .saturating_add(r.saturating_mul(5))
 }
 
 /// Buffers for one filter run, carved out of one caller-owned slice and sized to the
