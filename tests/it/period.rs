@@ -37,5 +37,6 @@ fn candidates_are_ranked_and_strong() {
 #[test]
 fn no_candidates_without_finite_data() {
     assert!(find_period(&[1.0, 2.0, f64::NAN, 4.0, 5.0], 2).is_empty());
+    assert!(find_period(&[1.0, 2.0, f64::INFINITY, 4.0, 5.0], 2).is_empty());
     assert!(find_period(&[1.0, 2.0, 3.0], 2).is_empty());
 }
