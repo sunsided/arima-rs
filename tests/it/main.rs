@@ -11,6 +11,7 @@
 //! - [`period`] compares the seasonal period candidates against coreforecast.
 //! - [`steady`] compares the filter's steady-state mode against statsmodels.
 //! - [`online`] compares the online AR predictor with the exact filter under changing dynamics.
+//! - [`pmm2`] compares PMM2 with maximum likelihood on series with skewed innovations.
 //! - [`properties`] checks mathematical invariants on random series with proptest.
 
 mod arma;
@@ -26,6 +27,7 @@ mod mstl_data;
 mod online;
 mod period;
 mod period_data;
+mod pmm2;
 mod properties;
 mod reference;
 mod reference_data;

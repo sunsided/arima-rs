@@ -23,6 +23,8 @@ mod hannan_rissanen;
 #[cfg(feature = "alloc")]
 mod mstl;
 mod objective;
+#[cfg(feature = "alloc")]
+mod pmm2;
 mod refit;
 #[cfg(feature = "alloc")]
 mod roots;
@@ -34,6 +36,8 @@ pub use auto::{AutoArima, AutoFit, Criterion, FourierFit, nsdiffs};
 pub use hannan_rissanen::{ArmaCoefficients, hannan_rissanen};
 #[cfg(feature = "alloc")]
 pub use mstl::{MstlArima, MstlForecast};
+#[cfg(feature = "alloc")]
+pub use pmm2::Pmm2Fit;
 pub use refit::{Refit, RefitOptions, Refitter};
 
 #[cfg(feature = "alloc")]
@@ -584,6 +588,8 @@ pub enum FitError {
     /// MSTL cannot decompose the series: no period is below half its length, a period is
     /// below 2, or a value is not finite.
     Decomposition,
+    /// The fitting method does not support this model, such as PMM2 with a seasonal part.
+    Unsupported,
 }
 
 impl From<FourierError> for FitError {
@@ -611,6 +617,7 @@ impl Display for FitError {
             FitError::Fourier(error) => write!(f, "invalid Fourier terms: {error}"),
             FitError::StartMismatch => write!(f, "the start values do not match the model"),
             FitError::Decomposition => write!(f, "MSTL cannot decompose the series"),
+            FitError::Unsupported => write!(f, "the fitting method does not support this model"),
         }
     }
 }
