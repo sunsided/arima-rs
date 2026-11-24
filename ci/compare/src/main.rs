@@ -7,7 +7,7 @@
 //! time, and the table reports the fastest repeat: the one least disturbed by it.
 
 use anofox_forecast::models::Forecaster;
-use backshift::{Arima, ArimaSpec, AutoArima, Seasonal, loglike};
+use backshift::{Arima, ArimaSpec, AutoArima, Method, Seasonal, loglike};
 use std::time::Instant;
 
 /// One benchmark model.
@@ -38,6 +38,9 @@ struct Estimate {
     sigma2: f64,
 }
 
+/// A crate's fit of one case, in backshift's conventions.
+type Fit = fn(&Case) -> Option<Estimate>;
+
 /// How often each fit is repeated; the table reports the fastest repeat.
 const REPEATS: usize = 15;
 
@@ -65,14 +68,17 @@ fn main() {
 
     println!("| Model | Crate | Fit time | Exact log-likelihood at its estimates |");
     println!("|---|---|---|---|");
-    let crates: [(&str, fn(&Case) -> Option<Estimate>); 3] = [
-        ("backshift", fit_backshift),
+    let crates: [(&str, Fit); 4] = [
+        ("backshift", |case| fit_backshift(case, Method::Exact)),
+        ("backshift (approximate)", |case| {
+            fit_backshift(case, Method::Css)
+        }),
         ("foresight 0.7.3", fit_foresight),
         ("anofox-forecast 0.21.0", fit_anofox),
     ];
     for case in &cases {
-        let mut fastest = [f64::INFINITY; 3];
-        let mut estimates: [Option<Estimate>; 3] = [None, None, None];
+        let mut fastest = [f64::INFINITY; 4];
+        let mut estimates: [Option<Estimate>; 4] = [None, None, None, None];
         for _ in 0..REPEATS {
             for (k, (_, fit)) in crates.iter().enumerate() {
                 let start = Instant::now();
@@ -103,8 +109,8 @@ fn main() {
     streaming();
 }
 
-/// backshift's own fit.
-fn fit_backshift(case: &Case) -> Option<Estimate> {
+/// backshift's own fit, exact or by conditional sum of squares only.
+fn fit_backshift(case: &Case, method: Method) -> Option<Estimate> {
     let (p, d, q) = case.order;
     let (sp, sd, sq, s) = case.seasonal;
     let model = Arima::new(p, d, q);
@@ -113,7 +119,11 @@ fn fit_backshift(case: &Case) -> Option<Estimate> {
     } else {
         model
     };
-    let fitted = model.mean(with_constant(case)).fit(&case.values).ok()?;
+    let fitted = model
+        .mean(with_constant(case))
+        .method(method)
+        .fit(&case.values)
+        .ok()?;
     Some(Estimate {
         ar: fitted.ar,
         ma: fitted.ma,
@@ -213,26 +223,32 @@ fn exact_loglike(case: &Case, e: &Estimate) -> f64 {
 /// interleaved, and prints the fastest repeat and the selected model of each.
 fn auto_report(case: &Case) {
     let s = case.seasonal.3;
-    let mut fastest = [f64::INFINITY; 3];
-    let mut orders = [String::new(), String::new(), String::new()];
+    let mut fastest = [f64::INFINITY; 4];
+    let mut orders = [String::new(), String::new(), String::new(), String::new()];
     let format = |p, d, q, sp, sd, sq| format!("({p},{d},{q})({sp},{sd},{sq},{s})");
     for _ in 0..5 {
-        let start = Instant::now();
-        let search = if s > 0 {
-            AutoArima::new().seasonal(s)
-        } else {
-            AutoArima::new()
-        };
-        let f = search.fit(&case.values).expect("search").fitted;
-        fastest[0] = fastest[0].min(start.elapsed().as_secs_f64());
-        orders[0] = format(
-            f.ar.len(),
-            f.d,
-            f.ma.len(),
-            f.seasonal_ar.len(),
-            f.seasonal_d,
-            f.seasonal_ma.len(),
-        );
+        for (k, approximation) in [(0, false), (3, true)] {
+            let start = Instant::now();
+            let search = if s > 0 {
+                AutoArima::new().seasonal(s)
+            } else {
+                AutoArima::new()
+            };
+            let f = search
+                .approximation(approximation)
+                .fit(&case.values)
+                .expect("search")
+                .fitted;
+            fastest[k] = fastest[k].min(start.elapsed().as_secs_f64());
+            orders[k] = format(
+                f.ar.len(),
+                f.d,
+                f.ma.len(),
+                f.seasonal_ar.len(),
+                f.seasonal_d,
+                f.seasonal_ma.len(),
+            );
+        }
 
         let start = Instant::now();
         let series = foresight::Series::new(&case.values, s.max(1));
@@ -257,8 +273,13 @@ fn auto_report(case: &Case) {
         };
     }
 
-    let names = ["backshift", "foresight 0.7.3", "anofox-forecast 0.21.0"];
-    for k in 0..3 {
+    let names = [
+        "backshift",
+        "foresight 0.7.3",
+        "anofox-forecast 0.21.0",
+        "backshift (approximate)",
+    ];
+    for k in [0, 3, 1, 2] {
         println!(
             "| {} | {} | {} | {} |",
             case.name,
