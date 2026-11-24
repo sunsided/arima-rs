@@ -250,4 +250,18 @@ mod tests {
         conformal.observe(f64::NAN);
         assert_eq!(conformal.calibration_len(0), 0);
     }
+
+    #[test]
+    fn horizons_past_capacity_are_unbounded() {
+        let mut conformal = Conformal::<1, 4>::new();
+        for y in [1.0, 2.0, 1.5, 2.5] {
+            conformal.record(&[1.0]);
+            conformal.observe(y);
+        }
+
+        let (mean, mut lower, mut upper) = ([0.0; 2], [0.0; 2], [0.0; 2]);
+        conformal.interval_into(0.5, &mean, &mut lower, &mut upper);
+        assert!(lower[0].is_finite() && upper[0].is_finite());
+        assert_eq!((lower[1], upper[1]), (f64::NEG_INFINITY, f64::INFINITY));
+    }
 }

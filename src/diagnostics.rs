@@ -443,4 +443,10 @@ mod tests {
         #[cfg(feature = "alloc")]
         assert_eq!(ndiffs(&x, 0.05, 2), 0);
     }
+
+    #[test]
+    fn kpss_needs_three_values() {
+        assert_eq!(kpss(&[1.0, 2.0], KpssNull::Level, 0), None);
+        assert!(kpss(&[1.0, 3.0, 2.0], KpssNull::Level, 0).is_some());
+    }
 }
