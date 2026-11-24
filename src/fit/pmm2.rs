@@ -36,7 +36,8 @@ const STEP_TOLERANCE: f64 = 1e-10;
 pub struct Pmm2Fit {
     /// The PMM2 model. `sigma2` and `loglike` are the exact Gaussian ones at its
     /// coefficients (post hoc, as in the paper), so the information criteria compare
-    /// with maximum likelihood fits. `iterations` counts Newton steps.
+    /// with maximum likelihood fits. `iterations` counts Newton steps; `converged` is
+    /// `false` if they hit the limit of 100 before the step fell below 1e-10.
     pub fitted: Fitted,
     /// The maximum-likelihood fit PMM2 started from.
     pub start: Fitted,
@@ -49,7 +50,10 @@ pub struct Pmm2Fit {
 impl Pmm2Fit {
     /// The theoretical variance reduction against least squares,
     /// `(2 + g4) / (2 + g4 - g3^2)`: 1 for symmetric innovations, about 1.67 for
-    /// Gamma(2, 1) ones.
+    /// Gamma(2, 1) ones. Only the size of the skewness matters, not its sign.
+    ///
+    /// It is finite and at least 1: a fit exists only when `mu2 (mu4 - mu2^2) > mu3^2`,
+    /// which is `2 + g4 > g3^2`.
     ///
     /// The paper recommends PMM2 over the start only when this is above about 1.2 and
     /// the series has at least 200 values.
@@ -70,6 +74,10 @@ impl Arima {
     /// ARMA(1, 1) models had 1.4 to 2 times less mean squared error than exact maximum
     /// likelihood, near [`Pmm2Fit::efficiency`]. With Gaussian innovations both were equal
     /// for AR models.
+    ///
+    /// With a mean (the drift for `d = 1`), the design has an intercept
+    /// `c = mean (1 - sum ar)` on the differenced series, from which the mean follows.
+    /// Newton takes full steps, as in the paper, without a line search.
     ///
     /// The MA part uses the starting innovations as fixed regressors, as the paper does.
     /// That linearisation costs efficiency: for an MA(1), PMM2 gained only a factor 1.2

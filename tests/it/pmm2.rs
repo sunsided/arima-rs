@@ -122,6 +122,38 @@ fn pmm2_matches_maximum_likelihood_with_gaussian_innovations() {
 }
 
 #[test]
+fn pmm2_estimates_a_drift_on_differenced_series() {
+    // ARIMA(1, 1, 0) with drift 0.3 and skewed innovations: the design, the innovations
+    // and the intercept all live on the differenced series.
+    let mut rng = Rng(4);
+    let mut w = simulate(&[0.7], 0, &[], &mut rng, true);
+    for value in &mut w {
+        *value += 0.3;
+    }
+
+    let mut level = 0.0;
+    let y: Vec<f64> = w
+        .iter()
+        .map(|v| {
+            level += v;
+            level
+        })
+        .collect();
+    let fit = Arima::new(1, 1, 0).mean(true).fit_pmm2(&y).unwrap();
+    // The drift estimate has a standard error of about 0.15 here, so compare it with the
+    // sample mean of the differences rather than with 0.3.
+    let sample = (y[y.len() - 1] - y[0]) / (y.len() - 1) as f64;
+    assert!(fit.fitted.converged);
+    assert!(
+        (fit.fitted.mean - sample).abs() < 0.05,
+        "{} vs {sample}",
+        fit.fitted.mean
+    );
+    assert!((fit.fitted.mean - fit.start.mean).abs() < 0.05);
+    assert!((fit.fitted.ar[0] - 0.7).abs() < 0.08, "{:?}", fit.fitted.ar);
+}
+
+#[test]
 fn pmm2_rejects_seasonal_models() {
     let y: Vec<f64> = (0..60)
         .map(|t| f64::from(t % 4) + 0.1 * f64::from(t))
