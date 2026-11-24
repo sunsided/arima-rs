@@ -2,7 +2,43 @@
 //! `tsCV` in [`crate::r_accuracy_data`], and the family selection on simulated series.
 
 use crate::r_accuracy_data::{ACCURACY, CROSS_VALIDATION};
-use backshift::{Family, accuracy, cross_validation_errors, select_family};
+use backshift::{
+    AutoArima, AutoEts, EtsFilter, Family, Filter, Theta, ThetaFilter, accuracy,
+    cross_validation_errors, select_family,
+};
+
+/// The forecast of the next `h` values of `y` by `family`, fitted directly through the
+/// public API, as `select_family` should fit its winner.
+fn direct_forecast(family: Family, y: &[f64], period: usize, h: usize) -> Vec<f64> {
+    let (mut mean, mut variance) = (vec![0.0; h], vec![0.0; h]);
+    match family {
+        Family::Arima => {
+            let fit = AutoArima::new().seasonal(period).fit(y).unwrap();
+            let mut filter = Box::new(Filter::<80>::new(&fit.fitted.spec()).unwrap());
+            filter.warm_up(y);
+            filter.forecast_into(&mut mean, &mut variance);
+        }
+        Family::Ets => {
+            let fit = AutoEts::new().seasonal(period).fit(y).unwrap();
+            let filter = EtsFilter::<24>::new(&fit.spec()).unwrap();
+            let mut scratch = vec![0.0; filter.forecast_scratch_len()];
+            filter.forecast_with(&mut scratch, &mut mean, &mut variance);
+        }
+        Family::Theta => {
+            let fit = Theta::new().seasonal(period).fit(y).unwrap();
+            let filter = ThetaFilter::<24>::new(&fit.spec()).unwrap();
+            filter.forecast_into(&mut mean, &mut variance);
+        }
+        Family::Naive => mean.fill(*y.last().unwrap()),
+        Family::SeasonalNaive => {
+            for (i, value) in mean.iter_mut().enumerate() {
+                *value = y[y.len() - period + i % period];
+            }
+        }
+    }
+
+    mean
+}
 
 /// A deterministic monthly series: trend, a strong season and small noise.
 fn seasonal_series(n: usize) -> Vec<f64> {
@@ -84,8 +120,16 @@ fn selection_picks_the_lowest_score_and_refits() {
         .1;
     assert_eq!(winner, best);
 
+    // Every family fits and forecasts at both origins; a silent failure would show as NaN.
+    for (family, score) in choice.scores {
+        assert!(score.is_finite(), "{family:?} failed to score");
+    }
+
     // A strong season makes the plain naive forecast lose to a seasonal family.
     assert_ne!(choice.family, Family::Naive);
+
+    // The forecast is the winner refitted on the whole series.
+    assert_eq!(choice.forecast, direct_forecast(choice.family, &y, 12, 6));
 
     // The seasonal naive score recomputed by hand from the two origins.
     let manual: f64 = [12, 6]
