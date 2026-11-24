@@ -115,7 +115,7 @@ fn forecasts_and_intervals_match_r() {
             EtsFilter::<CAPACITY>::new(&spec(case, case.final_states, case.sigma2)).unwrap();
         let h = case.mean.len();
         let (mut mean, mut lower, mut upper) = (vec![0.0; h], vec![0.0; h], vec![0.0; h]);
-        let mut scratch = vec![0.0; filter.forecast_scratch_len() + case.period];
+        let mut scratch = vec![0.0; filter.forecast_scratch_len()];
         filter.forecast_interval_with(&mut scratch, 0.95, &mut mean, &mut lower, &mut upper);
         // R's class-3 means are off for a damped trend; `damped_class3_matches_simulation`
         // checks that model instead.
@@ -168,7 +168,7 @@ fn matches_simulation(spec: &EtsSpec<'_>, paths: u32, tolerance: f64) {
     let start = EtsFilter::<CAPACITY>::new(spec).unwrap();
     let h = 6;
     let (mut mean, mut variance) = (vec![0.0; h], vec![0.0; h]);
-    let mut scratch = vec![0.0; start.forecast_scratch_len() + CAPACITY];
+    let mut scratch = vec![0.0; start.forecast_scratch_len()];
     start.forecast_with(&mut scratch, &mut mean, &mut variance);
 
     let mut draw = normals(7);

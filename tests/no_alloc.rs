@@ -158,7 +158,7 @@ fn main() {
         std::hint::black_box(m_ets.update(10.0 + f64::from(t % 4)));
     }
     let mut ets_scratch = [0.0; 7 * 64 + 3 * 8 + 4];
-    assert!(ets_scratch.len() >= m_ets.forecast_scratch_len() + 4);
+    assert!(ets_scratch.len() >= m_ets.forecast_scratch_len());
     m_ets.forecast_interval_with(
         &mut ets_scratch,
         0.9,

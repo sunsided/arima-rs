@@ -313,11 +313,12 @@ impl<const M: usize> EtsFilter<M> {
     }
 
     /// The working memory [`EtsFilter::forecast_with`] needs for this model: 0, or for a
-    /// multiplicative season `7 q^2 + 3 q` values with `q = m` (`2 m` with a trend).
+    /// multiplicative season `7 q^2 + 3 q + m` values with `q = m` (`2 m` with a trend): the
+    /// moment recursion, and the seasonal states in forecast order.
     #[must_use]
     pub const fn forecast_scratch_len(&self) -> usize {
         if self.smoothing.multiplicative_season {
-            class3::scratch_len(self.smoothing.trend, self.m)
+            class3::scratch_len(self.smoothing.trend, self.m) + self.m
         } else {
             0
         }
@@ -355,7 +356,7 @@ impl<const M: usize> EtsFilter<M> {
     /// expectations. If `scratch` is too short, the point forecasts stay and the variances
     /// are `NaN`. The seasonal ring is unrolled into the end of `scratch` first.
     fn class3_moments(&self, scratch: &mut [f64], mean: &mut [f64], variance: &mut [f64]) {
-        let needed = self.forecast_scratch_len() + self.m;
+        let needed = self.forecast_scratch_len();
         if scratch.len() < needed {
             variance.fill(f64::NAN);
             return;
@@ -437,11 +438,13 @@ mod tests {
     #[test]
     fn a_model_without_a_season_needs_no_seasonal_capacity() {
         let spec = EtsSpec {
+            error: Form::Additive,
             alpha: 0.3,
             trend: Trend::Additive { beta: 0.1 },
             gamma: 0.0,
             level: 10.0,
             slope: 1.0,
+            season: Form::Additive,
             seasonal: &[],
             sigma2: 1.0,
         };

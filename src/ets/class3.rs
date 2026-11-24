@@ -37,8 +37,11 @@ const fn states(trend: bool) -> usize {
 ///
 /// # Panics
 ///
-/// Panics if `scratch` is shorter than [`scratch_len`], `seasonal` is empty, or `mean` and
-/// `variance` have different lengths.
+/// Panics if `scratch` is shorter than [`scratch_len`] or `seasonal` is empty. Horizons past
+/// the shorter of `mean` and `variance` are left alone; [`EtsFilter::forecast_with`]
+/// checks that they match.
+///
+/// [`EtsFilter::forecast_with`]: crate::EtsFilter::forecast_with
 #[expect(
     clippy::too_many_arguments,
     reason = "the states, the scratch and both outputs are separate borrows"
