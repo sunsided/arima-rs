@@ -19,12 +19,15 @@
 //! - [`croston`] compares Croston's method against R's `croston`, fitted value by fitted value.
 //! - [`theta`] compares the Theta method against R's `thetaf`.
 //! - [`var`] compares VAR and VARX fits, forecasts and lag selection against statsmodels.
+//! - [`backtest`] compares the accuracy measures and rolling-origin errors against R's
+//!   `accuracy` and `tsCV`, and checks the family selection.
 //! - [`model_properties`] checks the filter, fits and search on random models and series.
 
 mod arma;
 mod arma_data;
 mod auto;
 mod auto_data;
+mod backtest;
 mod conformal;
 mod croston;
 mod ets;
@@ -41,6 +44,7 @@ mod period;
 mod period_data;
 mod pmm2;
 mod properties;
+mod r_accuracy_data;
 mod r_conformance;
 mod r_croston_data;
 mod r_data;

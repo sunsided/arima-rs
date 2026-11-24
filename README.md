@@ -103,6 +103,10 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
   `croston` (every fitted value to 1e-12), with the SBA and SBJ bias corrections, and the method of Teunter, Syntetos
   and Babai, whose forecast decays through long gaps. Both are heap-free with `O(1)` work per value, including
   `optimised`, which picks the smoothing parameters that minimise the in-sample error.
+- `accuracy`, `cross_validation_errors` and `select_family`: R's `accuracy` measures (ME, RMSE, MAE, MPE, MAPE,
+  MASE) and `tsCV` rolling-origin errors for any forecasting closure, both to 1e-12. `select_family` compares
+  automatic ARIMA, automatic ETS, Theta, naive and seasonal naive by their mean MASE on the last few forecast origins,
+  since information criteria do not compare across families, then refits the winner and forecasts.
 - `Var`, `select_var_order` and `OnlineVar<K, D>`: vector autoregression on several series at once, with exogenous
   regressors (VARX) and lag selection by AIC, BIC, HQIC or FPE, matching statsmodels' `VAR` to 1e-8. The heap-free
   `OnlineVar` streams a row of `K` values per step and scores it by the squared Mahalanobis distance of its errors,
