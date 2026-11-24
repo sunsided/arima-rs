@@ -123,7 +123,12 @@ impl<const R: usize, const L: usize> MstlFilter<R, L> {
         periods: &[usize],
         cycles: &[f64],
     ) -> Result<Self, MstlFilterError> {
-        let total: usize = periods.iter().sum();
+        let Some(total) = periods
+            .iter()
+            .try_fold(0_usize, |sum, &p| sum.checked_add(p))
+        else {
+            return Err(MstlFilterError::Periods);
+        };
         let periods_ok = !periods.is_empty()
             && periods.len() <= MAX_SEASONAL_PERIODS
             && periods.iter().all(|&p| p > 0)
@@ -203,5 +208,16 @@ impl<const R: usize, const L: usize> MstlFilter<R, L> {
         }
 
         sum
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overflowing_periods_are_rejected() {
+        let result = MstlFilter::<1, 8>::new(&ArimaSpec::default(), &[usize::MAX, 1], &[]);
+        assert!(matches!(result, Err(MstlFilterError::Periods)));
     }
 }

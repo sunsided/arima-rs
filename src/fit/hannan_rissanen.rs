@@ -43,7 +43,7 @@ pub struct ArmaCoefficients {
 /// ```
 #[must_use]
 pub fn hannan_rissanen(x: &[f64], p: usize, q: usize) -> Option<ArmaCoefficients> {
-    if !x.iter().all(|v| v.is_finite()) {
+    if x.len() <= p.max(q) || !math::all_finite(x) {
         return None;
     }
 
@@ -189,5 +189,11 @@ mod tests {
     fn rejects_short_or_non_finite_input() {
         assert!(hannan_rissanen(&[1.0, 2.0, f64::NAN, 3.0], 1, 0).is_none());
         assert!(hannan_rissanen(&[1.0, 2.0, 3.0], 1, 1).is_none());
+    }
+
+    #[test]
+    fn too_short_for_the_orders() {
+        assert!(hannan_rissanen(&[1.0, 2.0], 3, 0).is_none());
+        assert!(hannan_rissanen(&[], 0, 1).is_none());
     }
 }

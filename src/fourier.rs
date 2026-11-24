@@ -119,7 +119,7 @@ fn validate(period: f64, k: usize) -> Result<usize, FourierError> {
 
 /// Whether the `k`-th harmonic sits at the Nyquist frequency of `period`.
 fn is_nyquist(period: f64, k: usize) -> bool {
-    2.0 * k as f64 == period
+    k > 0 && 2.0 * k as f64 == period
 }
 
 /// Fourier regressors for several seasonal periods, `rows` rows from time `t0`, row-major.
@@ -232,5 +232,10 @@ mod tests {
         for (a, b) in early.iter().zip(&late) {
             assert!((a - b).abs() < 1e-12, "{a} vs {b}");
         }
+    }
+
+    #[test]
+    fn no_harmonics_have_no_columns() {
+        assert_eq!(fourier_columns(0.0, 0), 0);
     }
 }
