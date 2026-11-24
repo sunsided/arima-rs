@@ -445,6 +445,12 @@ mod tests {
     }
 
     #[test]
+    fn jarque_bera_needs_two_values() {
+        assert_eq!(jarque_bera(&[1.0]), None);
+        assert!(jarque_bera(&[1.0, 2.0]).is_some());
+    }
+
+    #[test]
     fn kpss_needs_three_values() {
         assert_eq!(kpss(&[1.0, 2.0], KpssNull::Level, 0), None);
         assert!(kpss(&[1.0, 3.0, 2.0], KpssNull::Level, 0).is_some());
