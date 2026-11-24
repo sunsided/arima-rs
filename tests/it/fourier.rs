@@ -1,7 +1,7 @@
 //! Checks the Fourier regressors against statsmodels and through a fit and a forecast.
 
 use crate::fourier_data::ALL;
-use backshift::{Arima, Filter, fourier, fourier_row};
+use backshift::{Arima, AutoArima, Filter, FitError, fourier, fourier_row};
 
 /// Absolute tolerance against statsmodels, whose angles are not reduced modulo the period.
 const TOLERANCE: f64 = 1e-9;
@@ -73,4 +73,60 @@ fn fit_and_forecast_with_fourier_regressors() {
         "{} vs {seasonal}",
         mean[24]
     );
+}
+
+#[test]
+fn aicc_selects_the_generating_harmonics() {
+    // Two harmonics at period 7 and one at period 30.5, on AR(1) noise.
+    let n = 300;
+    let mut state = 5_u32;
+    let mut noise = || {
+        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        f64::from(state >> 8) / f64::from(1_u32 << 24) - 0.5
+    };
+    let x = fourier(&[(7.0, 2), (30.5, 1)], 0, n).unwrap();
+    let mut ar = 0.0;
+    let y: Vec<f64> = x
+        .chunks_exact(6)
+        .map(|row| {
+            ar = 0.4 * ar + noise();
+            2.0 * row[0] + row[1] - 1.0 * row[2] + 0.8 * row[3] + 1.5 * row[4] - 0.5 * row[5] + ar
+        })
+        .collect();
+
+    let best = AutoArima::new()
+        .max_orders(2, 2, 0, 0)
+        .fit_fourier(&y, &[(7.0, 3), (30.5, 2)])
+        .unwrap();
+    assert_eq!(best.terms, [(7.0, 2), (30.5, 1)]);
+    assert_eq!(best.fit.fitted.exog.len(), 6);
+    assert_eq!(best.candidates, 1 + 2 + 1);
+}
+
+#[test]
+fn fourier_search_rejects_bad_periods() {
+    let y = [1.0; 30];
+    assert!(matches!(
+        AutoArima::new().fit_fourier(&y, &[(1.5, 1)]),
+        Err(FitError::Fourier(_))
+    ));
+}
+
+#[test]
+fn fourier_fit_matches_its_terms() {
+    // One harmonic at period 9, searched up to 3 with a second period: the winner of the
+    // first period (K = 1) is not the last K scored, and the second period starts from it.
+    // Refitting the returned terms must give the returned fit.
+    let y: Vec<f64> = (0..200)
+        .map(|t| (std::f64::consts::TAU * f64::from(t) / 9.0).cos() + 0.3 * f64::from(t % 4))
+        .collect();
+    let search = AutoArima::new().max_orders(1, 1, 0, 0);
+    let best = search.fit_fourier(&y, &[(9.0, 3), (4.5, 2)]).unwrap();
+    assert!(
+        best.terms[0].1 < 3,
+        "the case needs a winner before the last K"
+    );
+    let x = fourier(&best.terms, 0, y.len()).unwrap();
+    let again = search.fit_exog(&y, &x, best.fit.fitted.exog.len()).unwrap();
+    assert_eq!(again, best.fit);
 }

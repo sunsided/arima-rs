@@ -21,6 +21,7 @@
 
 use super::roots::max_inverse_root;
 use super::{Arima, FitError, Fitted};
+use crate::fourier::{FourierError, fourier, fourier_columns};
 use crate::{ndiffs, polynomial, stl};
 use alloc::collections::BTreeMap;
 use alloc::vec;
@@ -94,6 +95,24 @@ impl Orders {
     fn total(self) -> usize {
         self.p + self.q + self.seasonal_p + self.seasonal_q
     }
+}
+
+/// The best model of an [`AutoArima::fit_fourier`] search.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FourierFit {
+    /// The selected model; its `exog` holds the coefficients of the Fourier columns.
+    pub fit: AutoFit,
+    /// The selected `(period, K)` pairs, in the order given. [`fourier`] with these terms
+    /// rebuilds the regressors, from `t = y.len()` on for forecasts.
+    pub terms: Vec<(f64, usize)>,
+    /// How many `K` combinations were searched; each is a full [`AutoArima`] search.
+    pub candidates: usize,
+}
+
+/// The largest `K` to try for `period`: `max_k`, capped at `period / 2`.
+fn largest_k(period: f64, max_k: usize) -> usize {
+    // `period / 2` is finite and at least 1 here; the cast truncates it on purpose.
+    max_k.min((period / 2.0) as usize)
 }
 
 /// The best model of a search.
@@ -246,6 +265,92 @@ impl AutoArima {
         };
 
         search.run()
+    }
+
+    /// Selects the number of Fourier harmonics `K` per seasonal period, and the ARIMA
+    /// errors, by the search criterion (AICc by default): dynamic harmonic regression as in
+    /// FPP3 §10.5 and §12.1.
+    ///
+    /// `periods` holds `(period, max_k)` pairs. For each candidate `K`, the search fits a
+    /// non-seasonal ARIMA (`D = 0`, this search's other settings) to `y` with the Fourier
+    /// regressors of [`fourier`] from `t = 0`, and keeps the fit with the best criterion.
+    /// All `K` start at 1. Then each period in turn tries `K = 1, ..., max_k` with the other
+    /// periods fixed at their best so far (`K = 1` is the fit it starts from). The search is linear in `sum(max_k)` rather than a
+    /// full grid. `max_k` is capped at `period / 2`.
+    ///
+    /// AICc tends to choose too many harmonics for long periods, so cap `max_k` there. The
+    /// differencing order is chosen anew for each `K`, as R's `auto.arima` does.
+    ///
+    /// # Errors
+    ///
+    /// - [`FitError::Fourier`] if a period is not finite or below 2, or a `max_k` is 0.
+    /// - The error of the first candidate if no candidate can be fitted (see
+    ///   [`AutoArima::fit`]).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use backshift::{AutoArima, fourier};
+    ///
+    /// let y: Vec<f64> = (0..120)
+    ///     .map(|t| (core::f64::consts::TAU * t as f64 / 12.5).sin() + 0.1 * ((t * 7) % 5) as f64)
+    ///     .collect();
+    /// let search = AutoArima::new().max_orders(1, 1, 0, 0);
+    /// let best = search.fit_fourier(&y, &[(12.5, 4)]).unwrap();
+    /// let k = best.terms[0].1;
+    /// let future = fourier(&best.terms, y.len() as u64, 6).unwrap();
+    /// assert_eq!(future.len(), 6 * best.fit.fitted.exog.len());
+    /// assert!((1..=4).contains(&k));
+    /// ```
+    pub fn fit_fourier(&self, y: &[f64], periods: &[(f64, usize)]) -> Result<FourierFit, FitError> {
+        let auto = Self {
+            period: 0,
+            seasonal_d: Some(0),
+            ..*self
+        };
+        let mut terms = Vec::with_capacity(periods.len());
+        for &(period, max_k) in periods {
+            if !period.is_finite() || period < 2.0 || max_k == 0 {
+                return Err(FourierError::InvalidTerms.into());
+            }
+
+            terms.push((period, 1));
+        }
+
+        // Invariant: `best` is always the fit of the current `terms`. A period's start `K` is
+        // therefore already scored, and only the other values of `K` need a fit.
+        let mut best = auto.fit_terms(y, &terms)?;
+        let mut candidates = 1;
+        for (j, &(period, max_k)) in periods.iter().enumerate() {
+            let largest = largest_k(period, max_k);
+            let start = terms[j].1;
+            let mut chosen = start;
+            for k in (1..=largest).filter(|&k| k != start) {
+                terms[j].1 = k;
+                candidates += 1;
+                if let Ok(fit) = auto.fit_terms(y, &terms) {
+                    if fit.criterion < best.criterion {
+                        best = fit;
+                        chosen = k;
+                    }
+                }
+            }
+
+            terms[j].1 = chosen;
+        }
+
+        Ok(FourierFit {
+            fit: best,
+            terms,
+            candidates,
+        })
+    }
+
+    /// Fits this search to `y` with the Fourier regressors of `terms`.
+    fn fit_terms(&self, y: &[f64], terms: &[(f64, usize)]) -> Result<AutoFit, FitError> {
+        let regressors = fourier(terms, 0, y.len())?;
+        let columns = terms.iter().map(|&(p, k)| fourier_columns(p, k)).sum();
+        self.fit_exog(y, &regressors, columns)
     }
 
     /// `(d, D)`: the given orders, or `D` by [`nsdiffs`] and then `d` by

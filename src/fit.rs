@@ -27,13 +27,14 @@ mod roots;
 mod transform;
 
 #[cfg(feature = "alloc")]
-pub use auto::{AutoArima, AutoFit, Criterion, nsdiffs};
+pub use auto::{AutoArima, AutoFit, Criterion, FourierFit, nsdiffs};
 #[cfg(feature = "alloc")]
 pub use hannan_rissanen::{ArmaCoefficients, hannan_rissanen};
 pub use refit::{Refit, RefitOptions, Refitter};
 
 #[cfg(feature = "alloc")]
 use crate::filter::{ArimaSpec, Seasonal};
+use crate::fourier::FourierError;
 #[cfg(feature = "alloc")]
 use crate::likelihood::differenced;
 #[cfg(feature = "alloc")]
@@ -477,6 +478,14 @@ pub enum FitError {
         /// The values it holds.
         got: usize,
     },
+    /// The Fourier terms of a search are invalid.
+    Fourier(FourierError),
+}
+
+impl From<FourierError> for FitError {
+    fn from(error: FourierError) -> Self {
+        FitError::Fourier(error)
+    }
 }
 
 impl Display for FitError {
@@ -495,6 +504,7 @@ impl Display for FitError {
             FitError::BufferTooSmall { needed, got } => {
                 write!(f, "buffer holds {got} values, needs {needed}")
             }
+            FitError::Fourier(error) => write!(f, "invalid Fourier terms: {error}"),
         }
     }
 }
