@@ -589,10 +589,16 @@ impl Stream {
 
 /// The Ljung–Box test for leftover autocorrelation: `[statistic, pValue]` over `lags`
 /// lags with `modelDf` fitted coefficients, or `undefined` when the input does not allow
-/// the test (too few or non-finite values, or `modelDf >= lags`).
+/// the test (too few, too many or non-finite values, or `modelDf >= lags`). The test is
+/// `O(n lags)` and cannot be interrupted, so it takes at most `MAX_VALUES` residuals like
+/// every other entry point.
 #[wasm_bindgen(js_name = ljungBox)]
 #[must_use]
 pub fn ljung_box(residuals: &[f64], lags: usize, model_df: usize) -> Option<Vec<f64>> {
+    if check_values(residuals).is_err() {
+        return None;
+    }
+
     backshift::ljung_box(residuals, lags, model_df).map(|test| vec![test.statistic, test.p_value])
 }
 

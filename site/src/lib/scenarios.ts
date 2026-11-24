@@ -119,24 +119,27 @@ export const ALARM_SIGMAS = 4;
  */
 export function streamScenario(api: Api, training: number[], live: number[]): { label: string; points: StreamPoint[]; microsPerUpdate: number } {
 	const model = api.Model.fit(Float64Array.from(training), 1, 0, 0, 0, 0, 0, 0, true);
-	const stream = new api.Stream(model);
-	stream.warmUp(Float64Array.from(training));
-	const points: StreamPoint[] = [];
-	const started = performance.now();
-	for (const [i, value] of live.entries()) {
-		const [innovation, variance] = stream.update(value) ?? [Number.NaN, Number.NaN];
-		const bound = ALARM_SIGMAS * Math.sqrt(variance);
-		// An outlier also throws off the next prediction, so the value after it has a large
-		// innovation too; only the first of consecutive alarms is the anomaly.
-		const previous = points[points.length - 1];
-		const alarm = Math.abs(innovation) > bound;
-		points.push({ t: training.length + i, value, innovation, bound, anomaly: alarm && !(previous?.alarm ?? false), alarm });
+	let stream: Backshift.Stream | undefined;
+	try {
+		stream = new api.Stream(model);
+		stream.warmUp(Float64Array.from(training));
+		const points: StreamPoint[] = [];
+		const started = performance.now();
+		for (const [i, value] of live.entries()) {
+			const [innovation, variance] = stream.update(value) ?? [Number.NaN, Number.NaN];
+			const bound = ALARM_SIGMAS * Math.sqrt(variance);
+			// An outlier also throws off the next prediction, so the value after it has a large
+			// innovation too; only the first of consecutive alarms is the anomaly.
+			const previous = points[points.length - 1];
+			const alarm = Math.abs(innovation) > bound;
+			points.push({ t: training.length + i, value, innovation, bound, anomaly: alarm && !(previous?.alarm ?? false), alarm });
+		}
+		const microsPerUpdate = ((performance.now() - started) * 1000) / Math.max(1, live.length);
+		return { label: model.label(), points, microsPerUpdate };
+	} finally {
+		stream?.free();
+		model.free();
 	}
-	const microsPerUpdate = ((performance.now() - started) * 1000) / Math.max(1, live.length);
-	const label = model.label();
-	stream.free();
-	model.free();
-	return { label, points, microsPerUpdate };
 }
 
 /** The chart of a stream: the innovations, their alarm band, and the flagged values. */
@@ -177,30 +180,33 @@ export function driftScenario(api: Api, values: number[], window: number, startA
 	// The deployed model: coefficients fitted elsewhere, as on a device.
 	let model = api.Model.fromCoefficients(Float64Array.of(startAr), 0, new Float64Array(), new Float64Array(), 0, new Float64Array(), 0, 0, 1);
 	let stream = new api.Stream(model);
-	const standardised = new Float64Array(window);
-	const results: WindowResult[] = [];
-	for (let start = 0; start + window <= values.length; start += window) {
-		const chunk = values.slice(start, start + window);
-		chunk.forEach((value, i) => {
-			const [innovation, variance] = stream.update(value) ?? [Number.NaN, 1];
-			standardised[i] = innovation / Math.sqrt(variance);
-		});
-		const [, pValue] = api.ljungBox(standardised, 10, 1) ?? [Number.NaN, 1];
-		let refit = false;
-		if (pValue < DRIFT_ALPHA) {
-			const next = model.refit(Float64Array.from(chunk), false);
-			model.free();
-			model = next;
-			stream.free();
-			stream = new api.Stream(model);
-			stream.warmUp(Float64Array.from(chunk));
-			refit = true;
+	try {
+		const standardised = new Float64Array(window);
+		const results: WindowResult[] = [];
+		for (let start = 0; start + window <= values.length; start += window) {
+			const chunk = values.slice(start, start + window);
+			chunk.forEach((value, i) => {
+				const [innovation, variance] = stream.update(value) ?? [Number.NaN, 1];
+				standardised[i] = innovation / Math.sqrt(variance);
+			});
+			const [, pValue] = api.ljungBox(standardised, 10, 1) ?? [Number.NaN, 1];
+			let refit = false;
+			if (pValue < DRIFT_ALPHA) {
+				const next = model.refit(Float64Array.from(chunk), false);
+				model.free();
+				model = next;
+				stream.free();
+				stream = new api.Stream(model);
+				stream.warmUp(Float64Array.from(chunk));
+				refit = true;
+			}
+			results.push({ start, end: start + window, pValue, refit, ar: model.ar()[0] });
 		}
-		results.push({ start, end: start + window, pValue, refit, ar: model.ar()[0] });
+		return results;
+	} finally {
+		stream.free();
+		model.free();
 	}
-	stream.free();
-	model.free();
-	return results;
 }
 
 /** The drift chart: the series with refit windows shaded and the AR coefficient over time. */
