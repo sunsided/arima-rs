@@ -87,6 +87,19 @@ fn main() {
     }
     steady.forecast_into(&mut mean, &mut variance);
 
+    let mut conformal = backshift::Conformal::<3, 32>::new();
+    let mut conformal_filter = Filter::<4>::new(&spec).expect("stationary model");
+    let (mut conformal_mean, mut lower3, mut upper3) = ([0.0; 3], [0.0; 3], [0.0; 3]);
+    for t in 0..40 {
+        let y = f64::from(t % 5) - 2.0;
+        conformal.observe(y);
+        conformal_filter.update(y);
+        conformal_filter.forecast_into(&mut conformal_mean, &mut [0.0; 3]);
+        conformal.record(&conformal_mean);
+    }
+    conformal.interval_into(0.9, &conformal_mean, &mut lower3, &mut upper3);
+    std::hint::black_box((&lower3, &upper3));
+
     let mut fourier = [0.0; 4];
     backshift::fourier_row(365.25, 2, 1_000_000, &mut fourier).expect("valid terms");
     std::hint::black_box(&fourier);

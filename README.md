@@ -64,6 +64,9 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
   needs `R = 27`. `M` (default 0) holds the regression coefficients and does not grow the covariance.
   `with_steady_state()` opts into statsmodels' default steady-state shortcut: once the covariance converges, each
   update costs `O(R)` instead of `O(R²)`, and the results match statsmodels with its default tolerance.
+- `Conformal<H, N>`: heap-free conformal prediction intervals next to the filter's Gaussian ones. A rolling buffer of
+  the last `N` absolute `h`-step errors per horizon gives the half-width, so the intervals hold their coverage under
+  skewed or heavy-tailed noise without a change to the model (on one series this is empirical, not guaranteed).
 - Regression with ARIMA errors: `fit_exog`, `update_exog`, `forecast_exog_into` and friends model `y_t - x_t . beta`
   with the regressors differenced along with `y`, as R's `arima(xreg=)` does. [`examples/holidays_outages.rs`](https://github.com/sunsided/arima-rs/blob/main/examples/holidays_outages.rs)
   fits daily users with bank-holiday and outage dummies, and forecasts through a known upcoming holiday.
