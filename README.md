@@ -38,10 +38,12 @@ filter.forecast_interval_into(0.95, &mut mean, &mut lower, &mut upper);
 
 ## Who is this for
 
-The crate is for running ARIMA where statsmodels won't go: on a microcontroller watching a sensor, in WebAssembly,
-or in a Rust service that would rather not link BLAS. The streaming filter is the part that sets it apart. Each new value
-costs one Kalman step in `O(r²)` for `r = max(p, q + 1)` states, the innovation it returns doubles as an anomaly score
-(its variance comes with it), and the whole state lives inline in a `Copy` struct.
+The crate is for forecasting where statsmodels and R won't go: on a microcontroller watching a sensor, in WebAssembly,
+or in a Rust service that would rather not link BLAS. The streaming filters are the part that sets it apart. For ARIMA
+each new value costs one Kalman step in `O(r²)` for `r = max(p, q + 1)` states, the innovation it returns doubles as an
+anomaly score (its variance comes with it), and the whole state lives inline in a `Copy` struct. The other families
+(ETS, Theta, VAR, Croston and TSB, GARCH) work the same way, with `O(1)` or `O(K²)` work per value, and the changepoint
+detectors (CUSUM, BOCPD) watch the innovations any of them produce.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/sunsided/arima-rs/main/docs/img/stream-dark.svg">
@@ -150,19 +152,36 @@ The crate is `no_std`. With `default-features = false` pick one of the floating-
 | Features | For |
 |---|---|
 | `std` (default) | Everything, using the standard library's math functions. Implies `alloc`. |
-| `libm` | Bare-metal targets: `TimeSeries`, `acov`/`acorr`, `Filter`, `ArimaSpec::refit`, the diagnostic tests and `normal_quantile`. No allocator needed. |
-| `libm`, `alloc` | Bare-metal targets with an allocator: adds fitting, `pacf`, differencing and the estimators. |
+| `libm` | Bare-metal targets: every streaming filter (`Filter`, `EtsFilter`, `ThetaFilter`, `OnlineVar`, `CrostonFilter` and `TsbFilter` with their `optimised` fits, `GarchFilter`, `MstlFilter`, `OnlineAr`, `Conformal`), the changepoint detectors, `ArimaSpec::refit`, `accuracy`, the diagnostic tests, `fourier_row`, `trend_row`, `acov`/`acorr` and `normal_quantile`. No allocator needed. |
+| `libm`, `alloc` | Bare-metal targets with an allocator: adds the fits and searches of every family, backtesting, `pacf`, differencing, STL and the estimators. |
 | `rayon` | Fits the candidates of an exhaustive `AutoArima` search in parallel. Implies `std`. |
 
 ```toml
 [dependencies]
-backshift = { version = "0.1", default-features = false, features = ["libm"] }
+backshift = { version = "0.3", default-features = false, features = ["libm"] }
 ```
 
 CI links a `no_std`/`no_main` binary for `thumbv7em-none-eabihf` that runs an ARIMA(1,1,1) filter, forecasts with
-intervals and refits the model, and a counting allocator asserts that `Filter::new`, `update`, `warm_up`, the
-forecasts, the diagnostic tests and a refit allocate nothing. That binary comes out at about 52 KB of `.text`, of which
-the refit is about 21 KB. The filter's state lives inline:
+intervals, refits the model, and streams through every other filter and detector, and a counting allocator asserts
+that the same device paths allocate nothing. A firmware pays only for the families it calls: the linker drops the
+rest, so the crate needs no feature per family. The `.text` each one adds on its own, with the model read at run time
+(as from flash), so the compiler cannot fold its branches away:
+
+| Linked | `opt-level = 3` | `opt-level = "s"` |
+|---|---|---|
+| ARIMA `Filter`, with forecasts and intervals | 31 KB | 23 KB |
+| ARIMA `Filter` and `ArimaSpec::refit` | 43 KB | 28 KB |
+| `EtsFilter`, with forecasts and intervals | 24 KB | 16 KB |
+| `ThetaFilter` | 11 KB | 10 KB |
+| `OnlineVar` | 14 KB | 13 KB |
+| `CrostonFilter` and `TsbFilter` | 4 KB | 5 KB |
+| the same, with `TsbFilter::optimised` | 23 KB | 13 KB |
+| `GarchFilter` | 3 KB | 3 KB |
+| `Cusum` and `Bocpd` | 15 KB | 13 KB |
+| all of the above | 111 KB | 61 KB |
+
+The families share the `libm` functions, so together they take less than the sum of their rows. The ARIMA
+filter's state lives inline:
 
 | Capacity (`M = 0` unless given) | `size_of::<Filter<R, M>>()` | Fits, for example |
 |---|---|---|
@@ -217,8 +236,8 @@ runs the whole loop: stream, check every window, refit on drift, swap:
 
 ## In JavaScript
 
-The [`@sunsided/backshift`](https://www.npmjs.com/package/@sunsided/backshift) npm package brings fitting, forecasts,
-the streaming filter and refits to the browser and Node through WebAssembly, built from the same code with the `libm`
+The [`@sunsided/backshift`](https://www.npmjs.com/package/@sunsided/backshift) npm package brings ARIMA fitting,
+forecasts, the streaming filter and refits to the browser and Node through WebAssembly, built from the same code with the `libm`
 backend. The [demo site](https://sunsided.github.io/arima-rs/) runs on it; [`bindings/wasm`](https://github.com/sunsided/arima-rs/tree/main/bindings/wasm) has the
 API.
 
@@ -241,7 +260,9 @@ Every result is compared with statsmodels 0.14 on reference series generated by
 A second suite checks against R 4.4.2 and forecast 8.23 ([`scripts/generate_r_reference.R`](https://github.com/sunsided/arima-rs/blob/main/scripts/generate_r_reference.R),
 run in the pinned image of `scripts/r/`): `arima(method = "ML")` fits and `fixed =`, `predict` forecasts and
 standard errors (1e-6, `d` up to 2 and the airline model), `acf`, `pacf`, `Box.test` (1e-9), `fourier` (exact),
-`ndiffs`, `nsdiffs` and `auto.arima`'s orders. [`docs/CONFORMANCE.md`](https://github.com/sunsided/arima-rs/blob/main/docs/CONFORMANCE.md)
+`ndiffs`, `nsdiffs` and `auto.arima`'s orders. The other families have suites of their own: `ets` (likelihood,
+parameters, forecasts and intervals of all 15 default models), `thetaf`, `croston`, `accuracy` and `tsCV` against R,
+`tseries::garch` for GARCH, and statsmodels' `VAR` (1e-8). [`docs/CONFORMANCE.md`](https://github.com/sunsided/arima-rs/blob/main/docs/CONFORMANCE.md)
 lists every suite, how to regenerate it, and the known differences between the references.
 [`docs/VERIFICATION.md`](https://github.com/sunsided/arima-rs/blob/main/docs/VERIFICATION.md) covers the property tests,
 the Kani proofs of the device path and mutation testing.
@@ -343,11 +364,13 @@ seasonal search); `cargo bench` runs the in-crate Criterion benchmarks.
 
 ## Status
 
-The crate covers seasonal ARIMA(p, d, q)(P, D, Q, s) with an optional mean or drift and exogenous regressors, automatic
-order selection, STL and the usual diagnostics. Conformal prediction intervals and an online-learning mode are the next
-ideas; the
-[roadmap](https://github.com/sunsided/arima-rs/blob/main/docs/ROADMAP.md) has the details. The minimum supported Rust
-version is 1.85.
+The crate covers seasonal ARIMA(p, d, q)(P, D, Q, s) with an optional mean or drift and exogenous regressors and
+automatic order selection; ETS in all 15 of R's default models; Theta; VAR and VARX; Croston, SBA, SBJ and TSB;
+GARCH(1,1); streaming changepoint detection; STL and MSTL; conformal intervals and an online AR mode; the usual
+diagnostics; and backtesting to choose between the families. The GARCH variants (EGARCH, GJR-GARCH, IGARCH, FIGARCH,
+DCC-GARCH, Student-t innovations) are filed as issues; the
+[roadmap](https://github.com/sunsided/arima-rs/blob/main/docs/ROADMAP.md) has the plan and what was left out on
+purpose. The minimum supported Rust version is 1.85.
 
 ## License
 
