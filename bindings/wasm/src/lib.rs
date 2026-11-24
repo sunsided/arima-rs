@@ -239,6 +239,7 @@ impl Model {
             nobs: 0,
             iterations: 0,
             converged: true,
+            fixed: 0,
         };
         // The likelihood of no data checks every parameter and the stationarity of the AR
         // part, with no limit on the state count.
@@ -455,6 +456,7 @@ impl Model {
             nobs: refit.nobs,
             iterations: refit.iterations,
             converged: refit.converged,
+            fixed: 0,
             ..self.fitted.clone()
         };
 

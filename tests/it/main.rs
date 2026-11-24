@@ -5,6 +5,7 @@
 //! - [`auto`] compares the stepwise auto-ARIMA search against pmdarima.
 //! - [`conformal`] measures the coverage of conformal intervals on simulated series.
 //! - [`fourier`] compares the Fourier regressors against statsmodels.
+//! - [`fixed`] compares fits with fixed parts against statsmodels' `fix_params`.
 //! - [`fit`] compares Hannan–Rissanen and maximum-likelihood fits against statsmodels.
 //! - [`stl`] compares the STL decomposition against statsmodels.
 //! - [`mstl`] compares the MSTL decomposition against statsmodels.
@@ -20,6 +21,8 @@ mod auto;
 mod auto_data;
 mod conformal;
 mod fit;
+mod fixed;
+mod fixed_data;
 mod fourier;
 mod fourier_data;
 mod mstl;
