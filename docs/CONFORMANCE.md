@@ -65,6 +65,11 @@ cargo fmt
   the full Gaussian log-likelihood, as for ARIMA. R estimates the initial states with the
   smoothing parameters by Nelder–Mead; the crate solves them by least squares at each step,
   which reaches the same or a higher likelihood on every reference model.
+- **R's `thetaf` divides by its multiplicative seasonal indices** once its seasonality test
+  passes, however small they are. Where an index is below 1e-4 in absolute value (the season
+  of a series whose seasonal means are near zero), the crate fits without a season instead
+  of dividing by it, so its indices, drift and forecasts differ from R's there. Neither
+  reference series reaches it.
 - **R's Theta intervals** are `sigma sqrt(1 + (h - 1) alpha^2)` on the deseasonalised scale; `thetaf`
   does not multiply them by the seasonal index as it does the means. The crate follows R.
 - **R's `fourier`** starts at `t = 1` and statsmodels' `Fourier` at `t = 0`; `fourier_row` takes

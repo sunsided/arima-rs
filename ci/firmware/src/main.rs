@@ -94,9 +94,13 @@ pub extern "C" fn _start() -> ! {
         level: 10.0,
         count: 40,
         sigma2: 1.0,
-        seasonal: &[],
+        seasonal: &[1.1, 0.9, 1.05, 0.95],
     };
-    if let Ok(mut theta) = backshift::ThetaFilter::<1>::new(&theta_spec) {
+    if let Ok(mut theta) = backshift::ThetaFilter::<4>::new(&theta_spec) {
+        // Five values wrap the seasonal ring once.
+        for value in [10.5, 9.0, 10.2, 9.6] {
+            core::hint::black_box(theta.update(core::hint::black_box(value)));
+        }
         let innovation = theta.update(core::hint::black_box(10.5));
         let (mut mean, mut variance) = ([0.0; 3], [0.0; 3]);
         theta.forecast_into(&mut mean, &mut variance);

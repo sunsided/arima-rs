@@ -58,9 +58,11 @@ impl Theta {
         }
 
         let m = self.period;
+        // R divides by the indices whatever they are; one near zero (a season whose mean is
+        // near zero) would blow the adjusted series up, so such a season counts as none.
         let figure = (m > 1 && seasonal(y, m))
             .then(|| classical_figure(y, m, Form::Multiplicative))
-            .filter(|figure| figure.iter().all(|s| s.abs() >= 1e-4));
+            .filter(|figure| figure.iter().all(|s| s.abs() >= MIN_INDEX));
         let adjusted: Vec<f64> = match &figure {
             Some(figure) => y
                 .iter()
@@ -76,7 +78,8 @@ impl Theta {
             (0..m).map(|j| figure[(n + j) % m]).collect()
         });
         Ok(ThetaFit {
-            alpha: smoothing.alpha.max(1e-10),
+            // Positive, as `ThetaFilter` needs: ETS bounds it below by R's 1e-4.
+            alpha: smoothing.alpha,
             drift: slope(&adjusted) / 2.0,
             level: smoothing.level,
             count: n,
@@ -85,6 +88,10 @@ impl Theta {
         })
     }
 }
+
+/// The smallest seasonal index, in absolute value, the fit divides by; see
+/// `docs/CONFORMANCE.md`.
+const MIN_INDEX: f64 = 1e-4;
 
 /// R's seasonality test in `thetaf`: the lag-`m` autocorrelation exceeds the 95% one-sided
 /// normal quantile times its standard error `sqrt((1 + 2 sum_(i < m) r_i^2) / n)`, for a
