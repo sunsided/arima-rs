@@ -77,6 +77,7 @@ pub use crate::fit::{FitError, Method, Refit, RefitOptions, Refitter};
 #[cfg(feature = "alloc")]
 pub use crate::fourier::fourier;
 pub use crate::fourier::{FourierError, fourier_columns, fourier_row};
+pub use crate::intermittent::{CrostonFilter, CrostonVariant, TsbFilter};
 #[cfg(feature = "alloc")]
 pub use crate::likelihood::{innovations, innovations_exog, loglike, loglike_exog};
 pub use crate::normal::normal_quantile;
@@ -108,6 +109,7 @@ mod ets;
 mod filter;
 mod fit;
 mod fourier;
+mod intermittent;
 mod likelihood;
 mod linalg;
 mod math;

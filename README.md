@@ -99,6 +99,10 @@ a stepwise auto-ARIMA, but does not build for bare-metal targets.
 - `Theta` and `ThetaFilter<M>`: the Theta method as R's `thetaf` (simple exponential smoothing with drift, Hyndman
   and Billah 2003), with its seasonality test and multiplicative deseasonalising; the heap-free filter keeps the
   level learning and forecasts with R's intervals.
+- `CrostonFilter` and `TsbFilter`: intermittent demand, series that are zero most of the time. Croston's method as R's
+  `croston` (every fitted value to 1e-12), with the SBA and SBJ bias corrections, and the method of Teunter, Syntetos
+  and Babai, whose forecast decays through long gaps. Both are heap-free with `O(1)` work per value, including
+  `optimised`, which picks the smoothing parameters that minimise the in-sample error.
 - `Var`, `select_var_order` and `OnlineVar<K, D>`: vector autoregression on several series at once, with exogenous
   regressors (VARX) and lag selection by AIC, BIC, HQIC or FPE, matching statsmodels' `VAR` to 1e-8. The heap-free
   `OnlineVar` streams a row of `K` values per step and scores it by the squared Mahalanobis distance of its errors,

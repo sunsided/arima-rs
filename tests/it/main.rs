@@ -16,6 +16,7 @@
 //! - [`online`] compares the online AR predictor with the exact filter under changing dynamics.
 //! - [`pmm2`] compares PMM2 with maximum likelihood on series with skewed innovations.
 //! - [`properties`] checks mathematical invariants on random series with proptest.
+//! - [`croston`] compares Croston's method against R's `croston`, fitted value by fitted value.
 //! - [`theta`] compares the Theta method against R's `thetaf`.
 //! - [`var`] compares VAR and VARX fits, forecasts and lag selection against statsmodels.
 //! - [`model_properties`] checks the filter, fits and search on random models and series.
@@ -25,6 +26,7 @@ mod arma_data;
 mod auto;
 mod auto_data;
 mod conformal;
+mod croston;
 mod ets;
 mod fit;
 mod fixed;
@@ -40,6 +42,7 @@ mod period_data;
 mod pmm2;
 mod properties;
 mod r_conformance;
+mod r_croston_data;
 mod r_data;
 mod r_ets_data;
 mod r_theta_data;

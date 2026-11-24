@@ -50,11 +50,12 @@ jobs:
       - run: docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rscript scripts/generate_r_reference.R
       - run: docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rscript scripts/generate_r_ets_reference.R
       - run: docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rscript scripts/generate_r_theta_reference.R
+      - run: docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rscript scripts/generate_r_croston_reference.R
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
         with:
           toolchain: stable
           components: rustfmt
       - run: cargo fmt
       # R's arithmetic is the same in the pinned image, so any change is drift.
-      - run: git diff --exit-code --stat -- tests/it/r_data.rs tests/it/r_ets_data.rs tests/it/r_theta_data.rs
+      - run: git diff --exit-code --stat -- tests/it/r_data.rs tests/it/r_ets_data.rs tests/it/r_theta_data.rs tests/it/r_croston_data.rs
       - run: cargo test --test it
