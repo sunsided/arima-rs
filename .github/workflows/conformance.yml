@@ -28,10 +28,14 @@ jobs:
       - run: uv pip install --python .venv -r scripts/requirements.txt
       - run: .venv/bin/python -I scripts/generate_reference.py
       - run: .venv/bin/python -I scripts/generate_streaming_reference.py
-      - run: git diff --stat
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
         with:
           toolchain: stable
+          components: rustfmt
+      - run: cargo fmt
+      # Reported, not enforced: the floats move in the last digit with the runner's BLAS, so
+      # the tolerance-based tests below decide.
+      - run: git diff --stat -- tests/it
       - run: cargo test --test it
 
   r:
@@ -43,8 +47,11 @@ jobs:
           persist-credentials: false
       - run: docker build -t backshift-r-reference scripts/r
       - run: docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work backshift-r-reference Rscript scripts/generate_r_reference.R
-      - run: git diff --stat
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
         with:
           toolchain: stable
+          components: rustfmt
+      - run: cargo fmt
+      # R's arithmetic is the same in the pinned image, so any change is drift.
+      - run: git diff --exit-code --stat -- tests/it/r_data.rs
       - run: cargo test --test it
