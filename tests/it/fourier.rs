@@ -111,3 +111,16 @@ fn fourier_search_rejects_bad_periods() {
         Err(FitError::Fourier(_))
     ));
 }
+
+#[test]
+fn fourier_fit_matches_its_terms() {
+    // Whatever the search picks, refitting the returned terms gives the returned fit.
+    let y: Vec<f64> = (0..200)
+        .map(|t| (std::f64::consts::TAU * f64::from(t) / 9.0).cos() + 0.3 * f64::from(t % 4))
+        .collect();
+    let search = AutoArima::new().max_orders(1, 1, 0, 0);
+    let best = search.fit_fourier(&y, &[(9.0, 2), (4.5, 2)]).unwrap();
+    let x = fourier(&best.terms, 0, y.len()).unwrap();
+    let again = search.fit_exog(&y, &x, best.fit.fitted.exog.len()).unwrap();
+    assert_eq!(again.fitted, best.fit.fitted);
+}

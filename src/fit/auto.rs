@@ -275,7 +275,7 @@ impl AutoArima {
     /// non-seasonal ARIMA (`D = 0`, this search's other settings) to `y` with the Fourier
     /// regressors of [`fourier`] from `t = 0`, and keeps the fit with the best criterion.
     /// All `K` start at 1. Then each period in turn tries `K = 1, ..., max_k` with the other
-    /// periods fixed at their best so far. The search is linear in `sum(max_k)` rather than a
+    /// periods fixed at their best so far (`K = 1` is the fit it starts from). The search is linear in `sum(max_k)` rather than a
     /// full grid. `max_k` is capped at `period / 2`.
     ///
     /// AICc tends to choose too many harmonics for long periods, so cap `max_k` there. The
@@ -317,6 +317,8 @@ impl AutoArima {
             terms.push((period, 1));
         }
 
+        // Invariant: `best` is always the fit of the current `terms`. A period's start `K` is
+        // therefore already scored, and only the other values of `K` need a fit.
         let mut best = auto.fit_terms(y, &terms)?;
         let mut candidates = 1;
         for (j, &(period, max_k)) in periods.iter().enumerate() {
